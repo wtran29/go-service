@@ -17,6 +17,7 @@ import (
 	"service/app/services/sales-api/handlers"
 
 	"github.com/ardanlabs/conf/v3"
+
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
