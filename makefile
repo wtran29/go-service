@@ -11,6 +11,10 @@ SHELL := /bin/bash
 # openssl rsa -pubout -in private.pem -out public.pem
 # ./sales-admin genkey
 
+# Testing Auth
+# curl -il http://localhost:3000/v1/testauth
+# curl -il -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/testauth
+
 # ==============================================================================
 run:
 	go run app/services/sales-api/main.go | go run app/tooling/logfmt/main.go

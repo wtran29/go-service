@@ -65,7 +65,7 @@ func genToken() error {
 			ExpiresAt: time.Now().UTC().Add(8760 * time.Hour).Unix(),
 			IssuedAt:  time.Now().UTC().Unix(),
 		},
-		Roles: []string{"ADMIN"},
+		Roles: []string{"USER"},
 	}
 
 	method := jwt.GetSigningMethod("RS256")
