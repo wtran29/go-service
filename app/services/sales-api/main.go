@@ -16,6 +16,7 @@ import (
 
 	"service/app/services/sales-api/handlers"
 	"service/business/sys/auth"
+	"service/business/sys/database"
 	"service/foundation/keystore"
 
 	"github.com/ardanlabs/conf/v3"
@@ -75,15 +76,15 @@ func run(log *zap.SugaredLogger) error {
 		// 	MountPath string `conf:"default:secret"`
 		// 	Token     string `conf:"default:mytoken,mask"`
 		// }
-		// DB struct {
-		// 	User         string `conf:"default:postgres"`
-		// 	Password     string `conf:"default:postgres,mask"`
-		// 	Host         string `conf:"default:database-service.sales-system.svc.cluster.local"`
-		// 	Name         string `conf:"default:postgres"`
-		// 	MaxIdleConns int    `conf:"default:2"`
-		// 	MaxOpenConns int    `conf:"default:0"`
-		// 	DisableTLS   bool   `conf:"default:true"`
-		// }
+		DB struct {
+			User         string `conf:"default:postgres"`
+			Password     string `conf:"default:postgres,mask"`
+			Host         string `conf:"default:localhost"`
+			Name         string `conf:"default:postgres"`
+			MaxIdleConns int    `conf:"default:0"`
+			MaxOpenConns int    `conf:"default:0"`
+			DisableTLS   bool   `conf:"default:true"`
+		}
 		// Zipkin struct {
 		// 	ReporterURI string  `conf:"default:http://zipkin-service.sales-system.svc.cluster.local:9411/api/v2/spans"`
 		// 	ServiceName string  `conf:"default:sales-api"`
@@ -136,6 +137,29 @@ func run(log *zap.SugaredLogger) error {
 	if err != nil {
 		return fmt.Errorf("constructing auth: %w", err)
 	}
+
+	// =========================================================================
+	// Database Support
+
+	// Create connectivity to the database.
+	log.Infow("startup", "status", "initializing database support", "host", cfg.DB.Host)
+
+	db, err := database.Open(database.Config{
+		User:         cfg.DB.User,
+		Password:     cfg.DB.Password,
+		Host:         cfg.DB.Host,
+		Name:         cfg.DB.Name,
+		MaxIdleConns: cfg.DB.MaxIdleConns,
+		MaxOpenConns: cfg.DB.MaxOpenConns,
+		DisableTLS:   cfg.DB.DisableTLS,
+	})
+	if err != nil {
+		return fmt.Errorf("connecting to db: %w", err)
+	}
+	defer func() {
+		log.Infow("shutdown", "status", "stopping database support", "host", cfg.DB.Host)
+		db.Close()
+	}()
 
 	// =========================================================================
 	// Start Debug Service

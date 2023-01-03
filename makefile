@@ -15,6 +15,9 @@ SHELL := /bin/bash
 # curl -il http://localhost:3000/v1/testauth
 # curl -il -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/testauth
 
+# Database Access
+# dblab --host 0.0.0.0 --user postgres --db postgres --pass postgres --ssl disable --port 5432 --driver postgres
+
 # ==============================================================================
 run:
 	go run app/services/sales-api/main.go | go run app/tooling/logfmt/main.go
@@ -66,6 +69,8 @@ kind-load:
 	kind load docker-image sales-api-amd64:$(VERSION) --name $(KIND_CLUSTER)
 
 kind-apply:
+	kustomize build containers/k8s/kind/db-pod | kubectl apply -f -
+	kubectl wait --namespace=database-system --timeout=120s --for=condition=Available deployment/database-pod
 	kustomize build containers/k8s/kind/sales-pod | kubectl apply -f -
 
 kind-status:
@@ -75,6 +80,9 @@ kind-status:
 
 kind-status-sales:
 	kubectl get pods -o wide --watch --namespace=sales-system
+
+kind-status-db:
+	kubectl get pods -o wide --watch --namespace=database-system
 
 kind-logs:
 	kubectl logs -l app=sales --all-containers=true -f --tail=100 --namespace=sales-system | go run app/tooling/logfmt/main.go
