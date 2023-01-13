@@ -28,7 +28,7 @@ func main() {
 func seed() error {
 	cfg := database.Config{
 		User:         "postgres",
-		Password:     "postgres",
+		Password:     "tango1337",
 		Host:         "localhost",
 		Name:         "postgres",
 		MaxIdleConns: 0,
@@ -55,7 +55,7 @@ func seed() error {
 func migrate() error {
 	cfg := database.Config{
 		User:         "postgres",
-		Password:     "postgres",
+		Password:     "tango1337",
 		Host:         "localhost",
 		Name:         "postgres",
 		MaxIdleConns: 0,

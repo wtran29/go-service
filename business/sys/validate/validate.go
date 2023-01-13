@@ -1,44 +1,81 @@
 // Package validate contains the support for validating models.
 package validate
 
-import "errors"
+import (
+	"errors"
+	"reflect"
+	"strings"
 
-// ErrorResponse is the form used for API responses from failures in the API.
-type ErrorResponse struct {
-	Error  string            `json:"error"`
-	Fields map[string]string `json:"fields,omitempty"`
+	"service/vendor/github.com/google/uuid"
+
+	"github.com/go-playground/locales/en"
+	ut "github.com/go-playground/universal-translator"
+	"github.com/go-playground/validator/v10"
+	en_translations "github.com/go-playground/validator/v10/translations/en"
+)
+
+// validate holds the settings and caches for validating request struct values.
+var validate *validator.Validate
+
+// translator is a cache of locale and translation information.
+var translator ut.Translator
+
+func init() {
+
+	// Instantiate a validator.
+	validate = validator.New()
+
+	// Create a translator for english so the error messages are
+	// more human-readable than technical.
+	translator, _ = ut.New(en.New(), en.New()).GetTranslator("en")
+
+	// Register the english error messages for use.
+	en_translations.RegisterDefaultTranslations(validate, translator)
+
+	// Use JSON tag names for errors instead of Go struct names.
+	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
+		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		if name == "-" {
+			return ""
+		}
+		return name
+	})
 }
 
-// RequestError is used to pass an error during the request through the
-// application with web specific context.
-type RequestError struct {
-	Err    error
-	Status int
-}
+// Check validates the provided model against it's declared tags.
+func Check(val any) error {
+	if err := validate.Struct(val); err != nil {
 
-// NewRequestError wraps a provided error with an HTTP status code. This
-// function should be used when handlers encounter expected errors.
-func NewRequestError(err error, status int) error {
-	return &RequestError{err, status}
-}
+		// Use a type assertion to get the real error value.
+		verrors, ok := err.(validator.ValidationErrors)
+		if !ok {
+			return err
+		}
 
-// Error implements the error interface. It uses the default message of the
-// wrapped error. This is what will be shown in the services' logs.
-func (err *RequestError) Error() string {
-	return err.Err.Error()
-}
+		var fields FieldErrors
+		for _, verror := range verrors {
+			field := FieldError{
+				Field: verror.Field(),
+				Error: verror.Translate(translator),
+			}
+			fields = append(fields, field)
+		}
 
-// IsRequestError checks if an error of type RequestError exists.
-func IsRequestError(err error) bool {
-	var re *RequestError
-	return errors.As(err, &re)
-}
-
-// GetRequestError returns a copy of the RequestError pointer.
-func GetRequestError(err error) *RequestError {
-	var re *RequestError
-	if !errors.As(err, &re) {
-		return nil
+		return fields
 	}
-	return re
+
+	return nil
+}
+
+// GenerateID generate a unique id for entities.
+func GenerateID() string {
+	return uuid.NewString()
+}
+
+// CheckID validates that the format of an id is valid.
+func CheckID(id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return errors.New("ID is not in its proper form")
+	}
+	return nil
 }

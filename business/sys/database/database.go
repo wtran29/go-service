@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq" // Calls init function.
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -139,79 +142,79 @@ func WithinTran(ctx context.Context, log *zap.SugaredLogger, db Transactor, fn f
 	return nil
 }
 
-// // NamedExecContext is a helper function to execute a CUD operation with
-// // logging and tracing.
-// func NamedExecContext(ctx context.Context, log *zap.SugaredLogger, db sqlx.ExtContext, query string, data interface{}) error {
-// 	q := queryString(query, data)
-// 	log.Infow("database.NamedExecContext", "traceid", web.GetTraceID(ctx), "query", q)
+// NamedExecContext is a helper function to execute a CUD operation with
+// logging and tracing.
+func NamedExecContext(ctx context.Context, log *zap.SugaredLogger, db sqlx.ExtContext, query string, data interface{}) error {
+	q := queryString(query, data)
+	log.Infow("database.NamedExecContext", "traceid", web.GetTraceID(ctx), "query", q)
 
-// 	ctx, span := otel.GetTracerProvider().Tracer("").Start(ctx, "database.query")
-// 	span.SetAttributes(attribute.String("query", q))
-// 	defer span.End()
+	ctx, span := otel.GetTracerProvider().Tracer("").Start(ctx, "database.query")
+	span.SetAttributes(attribute.String("query", q))
+	defer span.End()
 
-// 	if _, err := sqlx.NamedExecContext(ctx, db, query, data); err != nil {
-// 		return err
-// 	}
+	if _, err := sqlx.NamedExecContext(ctx, db, query, data); err != nil {
+		return err
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
-// // NamedQuerySlice is a helper function for executing queries that return a
-// // collection of data to be unmarshaled into a slice.
-// func NamedQuerySlice(ctx context.Context, log *zap.SugaredLogger, db sqlx.ExtContext, query string, data interface{}, dest interface{}) error {
-// 	q := queryString(query, data)
-// 	log.Infow("database.NamedQuerySlice", "traceid", web.GetTraceID(ctx), "query", q)
+// NamedQuerySlice is a helper function for executing queries that return a
+// collection of data to be unmarshaled into a slice.
+func NamedQuerySlice(ctx context.Context, log *zap.SugaredLogger, db sqlx.ExtContext, query string, data interface{}, dest interface{}) error {
+	q := queryString(query, data)
+	log.Infow("database.NamedQuerySlice", "traceid", web.GetTraceID(ctx), "query", q)
 
-// 	ctx, span := otel.GetTracerProvider().Tracer("").Start(ctx, "database.query")
-// 	span.SetAttributes(attribute.String("query", q))
-// 	defer span.End()
+	ctx, span := otel.GetTracerProvider().Tracer("").Start(ctx, "database.query")
+	span.SetAttributes(attribute.String("query", q))
+	defer span.End()
 
-// 	val := reflect.ValueOf(dest)
-// 	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Slice {
-// 		return errors.New("must provide a pointer to a slice")
-// 	}
+	val := reflect.ValueOf(dest)
+	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Slice {
+		return errors.New("must provide a pointer to a slice")
+	}
 
-// 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
-// 	if err != nil {
-// 		return err
-// 	}
+	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
+	if err != nil {
+		return err
+	}
 
-// 	slice := val.Elem()
-// 	for rows.Next() {
-// 		v := reflect.New(slice.Type().Elem())
-// 		if err := rows.StructScan(v.Interface()); err != nil {
-// 			return err
-// 		}
-// 		slice.Set(reflect.Append(slice, v.Elem()))
-// 	}
+	slice := val.Elem()
+	for rows.Next() {
+		v := reflect.New(slice.Type().Elem())
+		if err := rows.StructScan(v.Interface()); err != nil {
+			return err
+		}
+		slice.Set(reflect.Append(slice, v.Elem()))
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
-// // NamedQueryStruct is a helper function for executing queries that return a
-// // single value to be unmarshalled into a struct type.
-// func NamedQueryStruct(ctx context.Context, log *zap.SugaredLogger, db sqlx.ExtContext, query string, data interface{}, dest interface{}) error {
-// 	q := queryString(query, data)
-// 	log.Infow("database.NamedQueryStruct", "traceid", web.GetTraceID(ctx), "query", q)
+// NamedQueryStruct is a helper function for executing queries that return a
+// single value to be unmarshalled into a struct type.
+func NamedQueryStruct(ctx context.Context, log *zap.SugaredLogger, db sqlx.ExtContext, query string, data interface{}, dest interface{}) error {
+	q := queryString(query, data)
+	log.Infow("database.NamedQueryStruct", "traceid", web.GetTraceID(ctx), "query", q)
 
-// 	ctx, span := otel.GetTracerProvider().Tracer("").Start(ctx, "database.query")
-// 	span.SetAttributes(attribute.String("query", q))
-// 	defer span.End()
+	ctx, span := otel.GetTracerProvider().Tracer("").Start(ctx, "database.query")
+	span.SetAttributes(attribute.String("query", q))
+	defer span.End()
 
-// 	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if !rows.Next() {
-// 		return ErrDBNotFound
-// 	}
+	rows, err := sqlx.NamedQueryContext(ctx, db, query, data)
+	if err != nil {
+		return err
+	}
+	if !rows.Next() {
+		return ErrDBNotFound
+	}
 
-// 	if err := rows.StructScan(dest); err != nil {
-// 		return err
-// 	}
+	if err := rows.StructScan(dest); err != nil {
+		return err
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
 // queryString provides a pretty print version of the query and parameters.
 func queryString(query string, args ...interface{}) string {

@@ -10,7 +10,7 @@ import (
 	"service/app/services/sales-api/handlers/debug/checkgrp"
 	"service/app/services/sales-api/handlers/v1/testgrp"
 	"service/business/sys/auth"
-	"service/business/web/mid"
+	"service/business/web/v1/mid"
 	"service/foundation/web"
 
 	"github.com/jmoiron/sqlx"

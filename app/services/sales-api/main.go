@@ -26,6 +26,11 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+/*
+	Need to figure out timeouts for http service.
+	Add validate.Email function.
+*/
+
 var build = "develop"
 
 func main() {
