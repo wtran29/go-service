@@ -1,4 +1,4 @@
-// Package userdb contains user related CRUD functionality.
+// Package db contains user related CRUD functionality.
 package db
 
 import (

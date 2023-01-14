@@ -1,8 +1,9 @@
 package db
 
 import (
-	"service/vendor/github.com/lib/pq"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // User represent the structure we need for moving data

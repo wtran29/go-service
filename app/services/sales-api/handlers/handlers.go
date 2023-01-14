@@ -8,7 +8,9 @@ import (
 	"net/http/pprof"
 	"os"
 	"service/app/services/sales-api/handlers/debug/checkgrp"
-	"service/app/services/sales-api/handlers/v1/testgrp"
+	v1TestGrp "service/app/services/sales-api/handlers/v1/testgrp"
+	v1UserGrp "service/app/services/sales-api/handlers/v1/usergrp"
+	userCore "service/business/core/user"
 	"service/business/sys/auth"
 	"service/business/web/v1/mid"
 	"service/foundation/web"
@@ -82,9 +84,21 @@ func APIMux(cfg APIMuxConfig) *web.App {
 func v1(app *web.App, cfg APIMuxConfig) {
 	const version = "v1"
 
-	tgh := testgrp.Handlers{
+	tgh := v1TestGrp.Handlers{
 		Log: cfg.Log,
 	}
 	app.Handle(http.MethodGet, version, "/test", tgh.Test)
 	app.Handle(http.MethodGet, version, "/testauth", tgh.Test, mid.Authenticate(cfg.Auth), mid.Authorize("ADMIN"))
+
+	// Register user management and authentication endpoints.
+	ugh := v1UserGrp.Handlers{
+		User: userCore.NewCore(cfg.Log, cfg.DB),
+		Auth: cfg.Auth,
+	}
+	app.Handle(http.MethodGet, version, "/users/token", ugh.Token)
+	app.Handle(http.MethodGet, version, "/users/:page/:rows", ugh.Query, mid.Authenticate(cfg.Auth), mid.Authorize(auth.RoleAdmin))
+	app.Handle(http.MethodGet, version, "/users/:id", ugh.QueryByID, mid.Authenticate(cfg.Auth))
+	app.Handle(http.MethodPost, version, "/users", ugh.Create, mid.Authenticate(cfg.Auth), mid.Authorize(auth.RoleAdmin))
+	app.Handle(http.MethodPut, version, "/users/:id", ugh.Update, mid.Authenticate(cfg.Auth), mid.Authorize(auth.RoleAdmin))
+	app.Handle(http.MethodDelete, version, "/users/:id", ugh.Delete, mid.Authenticate(cfg.Auth), mid.Authorize(auth.RoleAdmin))
 }

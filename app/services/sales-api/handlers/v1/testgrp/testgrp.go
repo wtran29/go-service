@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Handlers manages the set of check enpoints.
+// Handlers manages the set of check endpoints.
 type Handlers struct {
 	Log *zap.SugaredLogger
 }

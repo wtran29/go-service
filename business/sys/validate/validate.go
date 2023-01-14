@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"service/vendor/github.com/google/uuid"
+	"github.com/google/uuid"
 
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"

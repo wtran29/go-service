@@ -3,6 +3,14 @@ SHELL := /bin/bash
 # ==============================================================================
 # Testing running system
 
+# For testing a simple query on the system. Don't forget to `make seed` first.
+# curl --user "admin@example.com:gophers" http://localhost:3000/v1/users/token
+# export TOKEN="COPY TOKEN STRING FROM LAST CALL"
+# curl -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/users/1/2
+
+# For testing load on the service.
+# hey -m GET -c 100 -n 10000 -H "Authorization: Bearer ${TOKEN}" http://localhost:3000/v1/users/1/2
+
 # expvarmon -ports=":4000" -vars="build,requests,goroutines,errors,panics,mem:memstats.Alloc"
 # hey -m GET -c 100 -n 10000 http://localhost:3000/v1/test
 
@@ -98,6 +106,15 @@ kind-update-apply: all kind-load kind-apply
 
 kind-describe:
 	kubectl describe pod -l app=sales
+
+# ==============================================================================
+# Administration
+
+migrate:
+	go run app/tooling/admin/main.go migrate
+
+seed: migrate
+	go run app/tooling/admin/main.go seed
 
 # ==============================================================================
 # Modules support
