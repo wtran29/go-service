@@ -5,10 +5,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"fmt"
 	"service/business/data/schema"
+	"service/business/sys/auth"
 	"service/business/sys/database"
 	"service/foundation/docker"
+	"service/foundation/keystore"
 	"testing"
 	"time"
 
@@ -118,6 +122,44 @@ func NewUnit(t *testing.T, c *docker.Container, dbName string) (*zap.SugaredLogg
 	}
 
 	return log, db, teardown
+}
+
+// Test owns state for running and shutting down tests.
+type Test struct {
+	DB       *sqlx.DB
+	Log      *zap.SugaredLogger
+	Auth     *auth.Auth
+	Teardown func()
+
+	t *testing.T
+}
+
+// NewIntegration creates a database, seeds it, constructs an authenticator.
+func NewIntegration(t *testing.T, c *docker.Container, dbName string) *Test {
+	log, db, teardown := NewUnit(t, c, dbName)
+
+	// Create RSA keys to enable authentication in our service.
+	keyID := "54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build an authenticator using this private key and id for the key store.
+	auth, err := auth.New(keyID, keystore.NewMap(map[string]*rsa.PrivateKey{keyID: privateKey}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	test := Test{
+		DB:       db,
+		Log:      log,
+		Auth:     auth,
+		t:        t,
+		Teardown: teardown,
+	}
+
+	return &test
 }
 
 // StringPointer is a helper to get a *string from a string. It is in the tests
