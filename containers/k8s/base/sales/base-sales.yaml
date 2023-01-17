@@ -38,19 +38,19 @@ spec:
       initContainers:
       - name: init-vault-server
         image: sales-api-image
-        command: ['./sales-admin', 'vault-init']
+        command: ['./admin', 'vault-init']
         volumeMounts:
           - name: vault
             mountPath: /vault
       - name: init-vault
         image: sales-api-image
-        command: ['./sales-admin', 'vault']
+        command: ['./admin', 'vault']
       - name: init-migrate
         image: sales-api-image
-        command: ['./sales-admin', 'migrate']
+        command: ['./admin', 'migrate']
       - name: init-seed
         image: sales-api-image
-        command: ['./sales-admin', 'seed']
+        command: ['./admin', 'seed']
       containers:
       - name: sales-api
         image: sales-api-image

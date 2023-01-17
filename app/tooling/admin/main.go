@@ -1,260 +1,161 @@
+// This program performs administrative tasks for the sale service.
 package main
 
 import (
-	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"service/business/data/schema"
-	"service/business/sys/database"
-	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"service/app/tooling/admin/commands"
+	"service/business/sys/database"
+	"service/foundation/vault"
+
+	"github.com/ardanlabs/conf/v3"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
+var build = "develop"
+
+type config struct {
+	conf.Version
+	Args conf.Args
+	DB   struct {
+		User         string `conf:"default:postgres"`
+		Password     string `conf:"default:postgres,mask"`
+		Host         string `conf:"default:database-service.sales-system.svc.cluster.local"`
+		Name         string `conf:"default:postgres"`
+		MaxIdleConns int    `conf:"default:2"`
+		MaxOpenConns int    `conf:"default:0"`
+		DisableTLS   bool   `conf:"default:true"`
+	}
+	Vault struct {
+		KeysFolder string `conf:"default:containers/.env/"`
+		Address    string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
+		Token      string `conf:"default:mytoken,mask"`
+		MountPath  string `conf:"default:secret"`
+	}
+}
+
 func main() {
-	err := migrate()
-	if err != nil {
-		fmt.Println(err)
+	if err := run(zap.NewNop().Sugar()); err != nil {
+		if !errors.Is(err, commands.ErrHelp) {
+			fmt.Println("ERROR", err)
+		}
 		os.Exit(1)
 	}
 }
 
-func seed() error {
-	cfg := database.Config{
-		User:         "postgres",
-		Password:     "tango1337",
-		Host:         "localhost",
-		Name:         "postgres",
-		MaxIdleConns: 0,
-		MaxOpenConns: 0,
-		DisableTLS:   true,
-	}
-	db, err := database.Open(cfg)
-	if err != nil {
-		return fmt.Errorf("connect database: %w", err)
-	}
-	defer db.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := schema.Seed(ctx, db); err != nil {
-		return fmt.Errorf("seed database: %w", err)
-	}
-
-	fmt.Println("seed data complete")
-	return nil
-}
-
-func migrate() error {
-	cfg := database.Config{
-		User:         "postgres",
-		Password:     "tango1337",
-		Host:         "localhost",
-		Name:         "postgres",
-		MaxIdleConns: 0,
-		MaxOpenConns: 0,
-		DisableTLS:   true,
-	}
-	db, err := database.Open(cfg)
-	if err != nil {
-		return fmt.Errorf("connect database: %w", err)
-	}
-	defer db.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := schema.Migrate(ctx, db); err != nil {
-		return fmt.Errorf("migrate database: %w", err)
-	}
-
-	fmt.Println("migrations complete")
-
-	return seed()
-
-}
-
-func genToken() error {
-
-	name := "containers/.env/54bb2165-71e1-41a6-af3e-7da4a0e1e2c1.pem"
-	file, err := os.Open(name)
-	if err != nil {
-		return err
-	}
-
-	// limit PEM file size to 1 megabyte. This should be reasonable for
-	// almost any PEM file and prevents shenanigans like linking the file
-	// to /dev/random or something like that.
-	privatePEM, err := io.ReadAll(io.LimitReader(file, 1024*1024))
-	if err != nil {
-		return fmt.Errorf("reading auth private key: %w", err)
-	}
-
-	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM(privatePEM)
-	if err != nil {
-		return fmt.Errorf("parsing auth private key: %w", err)
-	}
-
-	// =============================================================
-	// Generating a token requires defining a set of claims. In this applications
-	// case, we only care about defining the subject and the user in question and
-	// the roles they have on the database. This token will expire in a year.
-	//
-	// iss (issuer): Issuer of the JWT
-	// sub (subject): Subject of the JWT (the user)
-	// aud (audience): Recipient for which the JWT is intended
-	// exp (expiration time): Time after which the JWT expires
-	// nbf (not before time): Time before which the JWT must not be accepted for processing
-	// iat (issued at time): Time at which the JWT was issued; can be used to determine age of the JWT
-	// jti (JWT ID): Unique identifier; can be used to prevent the JWT from being replayed (allows a token to be used only once)
-	claims := struct {
-		jwt.RegisteredClaims
-		Roles []string
-	}{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "service project",
-			Subject:   "123456789",
-			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+func run(log *zap.SugaredLogger) error {
+	cfg := config{
+		Version: conf.Version{
+			Build: build,
+			Desc:  "copyright information here",
 		},
-		Roles: []string{"ADMIN"},
 	}
 
-	method := jwt.GetSigningMethod("RS256")
-	token := jwt.NewWithClaims(method, claims)
-	// Find something that can implement rotation of the key id
-	token.Header["kid"] = "54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"
-
-	tokenStr, err := token.SignedString(privateKey)
+	const prefix = "SALES"
+	help, err := conf.Parse(prefix, &cfg)
 	if err != nil {
-		return err
-	}
-
-	fmt.Println("========= TOKEN BEGIN ==========")
-	fmt.Println(tokenStr)
-	fmt.Println("========= TOKEN END ============")
-	fmt.Print("\n")
-
-	// ==================================================================
-
-	// Marshal the public key from the private key to PKIX.
-	asn1Bytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return fmt.Errorf("marshaling public key: %w", err)
-	}
-
-	// Construct a PEM block for the public key.
-	publicBlock := pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: asn1Bytes,
-	}
-
-	// Write the public key to the public key file.
-	if err := pem.Encode(os.Stdout, &publicBlock); err != nil {
-		return fmt.Errorf("encoding to public file: %w", err)
-	}
-
-	fmt.Println("private and public key files generated")
-
-	// ====================================================================================
-
-	fmt.Println("=======================")
-
-	// Create the token parser to use. The algorithm used to sign the JWT must be
-	// validated to avoid a critical vulnerability:
-	// https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
-	parser := jwt.Parser{
-		ValidMethods: []string{"RS256"},
-	}
-
-	keyFunc := func(t *jwt.Token) (interface{}, error) {
-		kid, ok := t.Header["kid"]
-		if !ok {
-			return nil, errors.New("missing key id (kid) in token header")
+		if errors.Is(err, conf.ErrHelpWanted) {
+			fmt.Println(help)
+			return nil
 		}
-		kidID, ok := kid.(string)
-		if !ok {
-			return nil, errors.New("user token key id (kid) must be string")
+
+		out, err := conf.String(&cfg)
+		if err != nil {
+			return fmt.Errorf("generating config for output: %w", err)
 		}
-		fmt.Println("KID:", kidID)
-		return &privateKey.PublicKey, nil
-	}
-	var parsedClaims struct {
-		jwt.StandardClaims
-		Roles []string
+		log.Infow("startup", "config", out)
+
+		return fmt.Errorf("parsing config: %w", err)
 	}
 
-	parsedToken, err := parser.ParseWithClaims(tokenStr, &parsedClaims, keyFunc)
-	if err != nil {
-		return fmt.Errorf("parsing token: %w", err)
-	}
-
-	if !parsedToken.Valid {
-		return errors.New("invalid token")
-	}
-
-	fmt.Println("Token Validated")
-
-	return nil
+	return processCommands(cfg.Args, log, cfg)
 }
 
-// GenKey creates an x509 private/public key for auth tokens.
-func genKey() error {
-	// Generate a new private key.
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return fmt.Errorf("generating key: %w", err)
-	}
-	// Create a file for the private key information in PEM form.
-	privateFile, err := os.Create("private.pem")
-	if err != nil {
-		return fmt.Errorf("creating private file: %w", err)
-	}
-	defer privateFile.Close()
-
-	// Construct a PEM block for the private key.
-	privateBlock := pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+// processCommands handles the execution of the commands specified on
+// the command line.
+func processCommands(args conf.Args, log *zap.SugaredLogger, cfg config) error {
+	dbConfig := database.Config{
+		User:         cfg.DB.User,
+		Password:     cfg.DB.Password,
+		Host:         cfg.DB.Host,
+		Name:         cfg.DB.Name,
+		MaxIdleConns: cfg.DB.MaxIdleConns,
+		MaxOpenConns: cfg.DB.MaxOpenConns,
+		DisableTLS:   cfg.DB.DisableTLS,
 	}
 
-	// Write the private key to the private key file.
-	if err := pem.Encode(privateFile, &privateBlock); err != nil {
-		return fmt.Errorf("encoding to private file: %w", err)
-	}
-	// ====================================================================================
-
-	// Marshal the public key from the private key to PKIX.
-	asn1Bytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return fmt.Errorf("marshaling public key: %w", err)
-	}
-	// Create a file for the public key information in PEM form.
-	publicFile, err := os.Create("public.pem")
-	if err != nil {
-		return fmt.Errorf("creating public file: %w", err)
-	}
-	defer publicFile.Close()
-
-	// Construct a PEM block for the public key.
-	publicBlock := pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: asn1Bytes,
+	vaultConfig := vault.Config{
+		Address:   cfg.Vault.Address,
+		Token:     cfg.Vault.Token,
+		MountPath: cfg.Vault.MountPath,
 	}
 
-	// Write the public key to the public key file.
-	if err := pem.Encode(publicFile, &publicBlock); err != nil {
-		return fmt.Errorf("encoding to public file: %w", err)
-	}
+	switch args.Num(0) {
+	case "migrate":
+		if err := commands.Migrate(dbConfig); err != nil {
+			return fmt.Errorf("migrating database: %w", err)
+		}
 
-	fmt.Println("private and public key files generated")
+	case "seed":
+		if err := commands.Seed(dbConfig); err != nil {
+			return fmt.Errorf("seeding database: %w", err)
+		}
+
+	case "useradd":
+		name := args.Num(1)
+		email := args.Num(2)
+		password := args.Num(3)
+		if err := commands.UserAdd(log, dbConfig, name, email, password); err != nil {
+			return fmt.Errorf("adding user: %w", err)
+		}
+
+	case "users":
+		pageNumber := args.Num(1)
+		rowsPerPage := args.Num(2)
+		if err := commands.Users(log, dbConfig, pageNumber, rowsPerPage); err != nil {
+			return fmt.Errorf("getting users: %w", err)
+		}
+
+	case "genkey":
+		if err := commands.GenKey(); err != nil {
+			return fmt.Errorf("key generation: %w", err)
+		}
+
+	case "gentoken":
+		userID, err := uuid.Parse(args.Num(1))
+		if err != nil {
+			return fmt.Errorf("generating token: %w", err)
+		}
+		kid := args.Num(2)
+		if err := commands.GenToken(log, dbConfig, vaultConfig, userID, kid); err != nil {
+			return fmt.Errorf("generating token: %w", err)
+		}
+
+	case "vault":
+		if err := commands.Vault(vaultConfig, cfg.Vault.KeysFolder); err != nil {
+			return fmt.Errorf("setting private key: %w", err)
+		}
+
+	case "vault-init":
+		if err := commands.VaultInit(vaultConfig); err != nil {
+			return fmt.Errorf("initializing vault instance: %w", err)
+		}
+
+	default:
+		fmt.Println("migrate:    create the schema in the database")
+		fmt.Println("seed:       add data to the database")
+		fmt.Println("useradd:    add a new user to the database")
+		fmt.Println("users:      get a list of users from the database")
+		fmt.Println("genkey:     generate a set of private/public key files")
+		fmt.Println("gentoken:   generate a JWT for a user with claims")
+		fmt.Println("vault:      load private keys into vault system")
+		fmt.Println("vault-init: initialize a new vault instance")
+		fmt.Println("provide a command to get more help.")
+		return commands.ErrHelp
+	}
 
 	return nil
 }
