@@ -15,12 +15,19 @@ import (
 	"time"
 
 	"service/app/services/sales-api/handlers"
-	"service/business/sys/auth"
 	"service/business/sys/database"
-	"service/foundation/keystore"
+	"service/business/web/auth"
+	"service/business/web/v1/debug"
 	"service/foundation/logger"
+	"service/foundation/vault"
 
 	"github.com/ardanlabs/conf/v3"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/zipkin"
+	"go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
@@ -28,7 +35,6 @@ import (
 
 /*
 	Need to figure out timeouts for http service.
-	Add validate.Email function.
 */
 
 var build = "develop"
@@ -44,6 +50,7 @@ func main() {
 	// Perform the startup and shutdown sequence
 	if err := run(log); err != nil {
 		log.Errorw("startup", "ERROR", err)
+		log.Sync()
 		os.Exit(1)
 	}
 
@@ -72,29 +79,29 @@ func run(log *zap.SugaredLogger) error {
 			APIHost         string        `conf:"default:0.0.0.0:3000"`
 			DebugHost       string        `conf:"default:0.0.0.0:4000"`
 		}
-		Auth struct {
-			KeysFolder string `conf:"default:containers/.env/"`
-			ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
-		}
-		// Vault struct {
-		// 	Address   string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
-		// 	MountPath string `conf:"default:secret"`
-		// 	Token     string `conf:"default:mytoken,mask"`
+		// Auth struct {
+		// 	KeysFolder string `conf:"default:containers/.env/"`
+		// 	ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
 		// }
+		Vault struct {
+			Address   string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
+			MountPath string `conf:"default:secret"`
+			Token     string `conf:"default:mytoken,mask"`
+		}
 		DB struct {
 			User         string `conf:"default:postgres"`
 			Password     string `conf:"default:postgres,mask"`
-			Host         string `conf:"default:localhost"`
+			Host         string `conf:"default:database-service.sales-system.svc.cluster.local"`
 			Name         string `conf:"default:postgres"`
-			MaxIdleConns int    `conf:"default:0"`
+			MaxIdleConns int    `conf:"default:2"`
 			MaxOpenConns int    `conf:"default:0"`
 			DisableTLS   bool   `conf:"default:true"`
 		}
-		// Zipkin struct {
-		// 	ReporterURI string  `conf:"default:http://zipkin-service.sales-system.svc.cluster.local:9411/api/v2/spans"`
-		// 	ServiceName string  `conf:"default:sales-api"`
-		// 	Probability float64 `conf:"default:0.05"`
-		// }
+		Zipkin struct {
+			ReporterURI string  `conf:"default:http://zipkin-service.sales-system.svc.cluster.local:9411/api/v2/spans"`
+			ServiceName string  `conf:"default:sales-api"`
+			Probability float64 `conf:"default:0.05"`
+		}
 	}{
 		Version: conf.Version{
 			Build: build,
@@ -127,26 +134,8 @@ func run(log *zap.SugaredLogger) error {
 	expvar.NewString("build").Set(build)
 
 	// =========================================================================
-	// Initialize authentication support
-
-	log.Infow("startup", "status", "initializing authentication support")
-
-	// Construct a key store based on the key files stored in
-	// the specified directory.
-	ks, err := keystore.NewFS(os.DirFS(cfg.Auth.KeysFolder))
-	if err != nil {
-		return fmt.Errorf("reading keys: %w", err)
-	}
-
-	auth, err := auth.New(cfg.Auth.ActiveKID, ks)
-	if err != nil {
-		return fmt.Errorf("constructing auth: %w", err)
-	}
-
-	// =========================================================================
 	// Database Support
 
-	// Create connectivity to the database.
 	log.Infow("startup", "status", "initializing database support", "host", cfg.DB.Host)
 
 	db, err := database.Open(database.Config{
@@ -167,28 +156,70 @@ func run(log *zap.SugaredLogger) error {
 	}()
 
 	// =========================================================================
+	// Initialize authentication support
+
+	log.Infow("startup", "status", "initializing authentication support")
+
+	vault, err := vault.New(vault.Config{
+		Address:   cfg.Vault.Address,
+		Token:     cfg.Vault.Token,
+		MountPath: cfg.Vault.MountPath,
+	})
+	if err != nil {
+		return fmt.Errorf("constructing vault: %w", err)
+	}
+
+	authCfg := auth.Config{
+		Log:       log,
+		DB:        db,
+		KeyLookup: vault,
+	}
+
+	auth, err := auth.New(authCfg)
+	if err != nil {
+		return fmt.Errorf("constructing auth: %w", err)
+	}
+
+	// =========================================================================
+	// Start Tracing Support
+
+	log.Infow("startup", "status", "initializing OT/Zipkin tracing support")
+
+	traceProvider, err := startTracing(
+		cfg.Zipkin.ServiceName,
+		cfg.Zipkin.ReporterURI,
+		cfg.Zipkin.Probability,
+	)
+	if err != nil {
+		return fmt.Errorf("starting tracing: %w", err)
+	}
+	defer traceProvider.Shutdown(context.Background())
+
+	tracer := traceProvider.Tracer("service")
+
+	// =========================================================================
 	// Start Debug Service
 
-	log.Infow("startup", "status", "debug router started", "host", cfg.Web.DebugHost)
+	log.Infow("startup", "status", "debug v1 router started", "host", cfg.Web.DebugHost)
 
 	// The Debug function returns a mux to listen and serve on for all the debug
 	// related endpoints. This include the standard library endpoints.
 
 	// Construct the mux for the debug calls.
-	debugMux := handlers.DebugMux(build, log, db)
+	// debugMux := handlers.DebugMux(build, log, db)
 
 	// Start the service listening for debug requests.
 	// Not concerned with shutting this down with load shedding.
 	go func() {
-		if err := http.ListenAndServe(cfg.Web.DebugHost, debugMux); err != nil {
-			log.Errorw("shutdown", "status", "debug router closed", "host", cfg.Web.DebugHost, "ERROR", err)
+		if err := http.ListenAndServe(cfg.Web.DebugHost, debug.Mux(build, log, db)); err != nil {
+			log.Errorw("shutdown", "status", "debug v1 router closed", "host", cfg.Web.DebugHost, "ERROR", err)
 		}
 	}()
 
 	// =========================================================================
 	// Start API Service
 
-	log.Infow("startup", "status", "initializing API support")
+	log.Infow("startup", "status", "initializing  V1 API support")
 
 	// Make a channel to listen for an interrupt or terminate signal from the OS.
 	// Use a buffered channel because the signal package requires it.
@@ -201,6 +232,7 @@ func run(log *zap.SugaredLogger) error {
 		Log:      log,
 		Auth:     auth,
 		DB:       db,
+		Tracer:   tracer,
 	})
 
 	// Construct a server to service the requests against the mux.
@@ -246,6 +278,47 @@ func run(log *zap.SugaredLogger) error {
 	}
 
 	return nil
+}
+
+// =============================================================================
+
+// startTracing configure open telemetery to be used with zipkin.
+func startTracing(serviceName string, reporterURI string, probability float64) (*trace.TracerProvider, error) {
+
+	// WARNING: The current settings are using defaults which may not be
+	// compatible with your project. Please review the documentation for
+	// opentelemetry.
+
+	exporter, err := zipkin.New(
+		reporterURI,
+		// zipkin.WithLogger(zap.NewStdLog(log)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating new exporter: %w", err)
+	}
+
+	traceProvider := trace.NewTracerProvider(
+		trace.WithSampler(trace.TraceIDRatioBased(probability)),
+		trace.WithBatcher(exporter,
+			trace.WithMaxExportBatchSize(trace.DefaultMaxExportBatchSize),
+			trace.WithBatchTimeout(trace.DefaultScheduleDelay*time.Millisecond),
+			trace.WithMaxExportBatchSize(trace.DefaultMaxExportBatchSize),
+		),
+		trace.WithResource(
+			resource.NewWithAttributes(
+				semconv.SchemaURL,
+				semconv.ServiceNameKey.String(serviceName),
+				attribute.String("exporter", "zipkin"),
+			),
+		),
+	)
+
+	// We must set this provider as the global provider for things to work,
+	// but we pass this provider around the program where needed to collect
+	// our traces.
+	// I can only get this working properly using the singleton :(
+	otel.SetTracerProvider(traceProvider)
+	return traceProvider, nil
 }
 
 // Moved to foundations/logger as func New()

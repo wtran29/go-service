@@ -14,11 +14,11 @@ func New(service string) (*zap.SugaredLogger, error) {
 	config.OutputPaths = []string{"stdout"}
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	config.DisableStacktrace = true
-	config.InitialFields = map[string]interface{}{
+	config.InitialFields = map[string]any{
 		"service": service,
 	}
 
-	log, err := config.Build()
+	log, err := config.Build(zap.WithCaller(true))
 	if err != nil {
 		return nil, err
 	}

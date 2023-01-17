@@ -3,6 +3,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -12,6 +13,8 @@ import (
 
 	"service/foundation/web"
 
+	"github.com/lib/pq"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq" // Calls init function.
 	"go.opentelemetry.io/otel"
@@ -19,9 +22,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// lib/pq errorCodeNames
+// https://github.com/lib/pq/blob/master/error.go#L178
+const (
+	uniqueViolation = "23505"
+	undefinedTable  = "42P01"
+)
+
 // Set of error variables for CRUD operations.
 var (
-	ErrDBNotFound = errors.New("not found")
+	ErrDBNotFound        = errors.New("not found")
+	ErrDBDuplicatedEntry = errors.New("duplicated entry")
+	ErrUndefinedTable    = errors.New("undefined table")
 )
 
 // Config is the required properties to use the database.
@@ -99,7 +111,7 @@ type Transactor interface {
 }
 
 // WithinTran runs passed function and do commit/rollback at the end.
-func WithinTran(ctx context.Context, log *zap.SugaredLogger, db Transactor, fn func(sqlx.ExtContext) error) error {
+func WithinTran(ctx context.Context, log *zap.SugaredLogger, db *sqlx.DB, fn func(*sqlx.Tx) error) error {
 	traceID := web.GetTraceID(ctx)
 
 	// Begin the transaction.
@@ -109,35 +121,50 @@ func WithinTran(ctx context.Context, log *zap.SugaredLogger, db Transactor, fn f
 		return fmt.Errorf("begin tran: %w", err)
 	}
 
-	// Mark to the defer function a rollback is required.
-	mustRollback := true
+	// // Mark to the defer function a rollback is required.
+	// mustRollback := true
 
-	// Setup a defer function for rolling back the transaction. If
-	// mustRollback is true it means the call to fn failed and we
-	// need to rollback the transaction.
+	// // Setup a defer function for rolling back the transaction. If
+	// // mustRollback is true it means the call to fn failed and we
+	// // need to rollback the transaction.
+	// defer func() {
+	// 	if mustRollback {
+	// 		log.Infow("rollback tran", "traceid", traceID)
+	// 		if err := tx.Rollback(); err != nil {
+	// 			log.Errorw("unable to rollback tran", "traceid", traceID, "ERROR", err)
+	// 		}
+	// 	}
+	// }()
+
+	// We can defer the rollback since the code checks if the transaction
+	// has already been committed.
 	defer func() {
-		if mustRollback {
-			log.Infow("rollback tran", "traceid", traceID)
-			if err := tx.Rollback(); err != nil {
-				log.Errorw("unable to rollback tran", "traceid", traceID, "ERROR", err)
+		if err := tx.Rollback(); err != nil {
+			if errors.Is(err, sql.ErrTxDone) {
+				return
 			}
+			log.Errorw("unable to rollback tran", "trace_id", traceID, "ERROR", err)
 		}
+		log.Infow("rollback tran", "trace_id", traceID)
 	}()
 
 	// Execute the code inside of the transaction. If the function
 	// fails, return the error and the defer function will rollback.
 	if err := fn(tx); err != nil {
+		if pqerr, ok := err.(*pq.Error); ok && pqerr.Code == uniqueViolation {
+			return ErrDBDuplicatedEntry
+		}
 		return fmt.Errorf("exec tran: %w", err)
 	}
 
 	// Disarm the deferred rollback.
-	mustRollback = false
+	// mustRollback = false
 
 	// Commit the transaction.
-	log.Infow("commit tran", "traceid", traceID)
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit tran: %w", err)
 	}
+	log.Infow("commit tran", "traceid", traceID)
 
 	return nil
 }

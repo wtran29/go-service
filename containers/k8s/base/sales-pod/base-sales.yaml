@@ -26,6 +26,12 @@ spec:
         image: sales-api-image
         command: ['./admin']
       containers:
+      # zipkin container configuration
+      - name: zipkin
+        image: openzipkin
+        ports:
+        - name: zipkin
+          containerPort: 9411
       - name: sales-api
         image: sales-api-image
         ports:
@@ -79,6 +85,9 @@ spec:
   selector:
     app: sales
   ports:
+  - name: zipkin
+    port: 9411
+    targetPort: zipkin
   - name: sales-api
     port: 3000
     targetPort: sales-api
