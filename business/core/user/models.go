@@ -48,18 +48,3 @@ type UpdateUser struct {
 	PasswordConfirm *string       `json:"password_confirm" validate:"omitempty,eqfield=Password"`
 	Enabled         *bool         `json:"enabled"`
 }
-
-// =============================================================================
-
-// func toUser(dbUsr db.User) User {
-// 	pu := (*User)(unsafe.Pointer(&dbUsr))
-// 	return *pu
-// }
-
-// func toUserSlice(dbUsrs []db.User) []User {
-// 	users := make([]User, len(dbUsrs))
-// 	for i, dbUsr := range dbUsrs {
-// 		users[i] = toUser(dbUsr)
-// 	}
-// 	return users
-// }

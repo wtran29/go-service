@@ -1,5 +1,7 @@
 {
     "editor.tokenColorCustomizations": {
     "comments": "#5ead67"
-    }
+    },
+    "terminal.integrated.defaultProfile.windows": "Git Bash",
+    "terminal.integrated.shellIntegration.enabled": true
 }

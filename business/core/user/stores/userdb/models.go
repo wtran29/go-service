@@ -3,21 +3,19 @@ package userdb
 import (
 	"fmt"
 	"net/mail"
-
 	"time"
 
 	"service/business/core/user"
 	"service/business/data/order"
 
 	"github.com/google/uuid"
-
 	"github.com/lib/pq"
 )
 
-// User represent the structure we need for moving data
+// dbUser represent the structure we need for moving data
 // between the app and the database.
 type dbUser struct {
-	ID           string         `db:"user_id"`
+	ID           uuid.UUID      `db:"user_id"`
 	Name         string         `db:"name"`
 	Email        string         `db:"email"`
 	Roles        pq.StringArray `db:"roles"`
@@ -31,7 +29,7 @@ type dbUser struct {
 
 func toDBUser(usr user.User) dbUser {
 	return dbUser{
-		ID:           usr.ID.String(),
+		ID:           usr.ID,
 		Name:         usr.Name,
 		Email:        usr.Email.Address,
 		Roles:        usr.Roles,
@@ -43,16 +41,14 @@ func toDBUser(usr user.User) dbUser {
 }
 
 func toCoreUser(dbUsr dbUser) user.User {
-	addr, err := mail.ParseAddress(dbUsr.Email)
-	if err != nil {
-		addr.Name = "unknown"
-		addr.Address = dbUsr.Email
+	addr := mail.Address{
+		Address: dbUsr.Email,
 	}
 
 	usr := user.User{
-		ID:           uuid.MustParse(dbUsr.ID),
+		ID:           dbUsr.ID,
 		Name:         dbUsr.Name,
-		Email:        *addr,
+		Email:        addr,
 		Roles:        dbUsr.Roles,
 		PasswordHash: dbUsr.PasswordHash,
 		Enabled:      dbUsr.Enabled,

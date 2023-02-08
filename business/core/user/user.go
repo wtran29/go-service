@@ -14,7 +14,6 @@ import (
 	"service/business/sys/validate"
 
 	"github.com/google/uuid"
-
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -39,7 +38,7 @@ type Storer interface {
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
 }
 
-// Core manages the set of API's for user access.
+// Core manages the set of APIs for user access.
 type Core struct {
 	storer Storer
 }
@@ -87,10 +86,6 @@ func (c *Core) Create(ctx context.Context, nu NewUser) (User, error) {
 		return User{}, fmt.Errorf("tran: %w", err)
 	}
 
-	// if err := c.store.Create(ctx, dbUsr); err != nil {
-	// 	return User{}, fmt.Errorf("create: %w", err)
-	// }
-
 	return usr, nil
 }
 
@@ -122,7 +117,7 @@ func (c *Core) Update(ctx context.Context, usr User, uu UpdateUser) (User, error
 	usr.DateUpdated = time.Now()
 
 	if err := c.storer.Update(ctx, usr); err != nil {
-		return User{}, fmt.Errorf("udpate: %w", err)
+		return User{}, fmt.Errorf("update: %w", err)
 	}
 
 	return usr, nil
@@ -184,23 +179,9 @@ func (c *Core) Authenticate(ctx context.Context, email mail.Address, password st
 		return User{}, fmt.Errorf("query: %w", err)
 	}
 
-	// Compare the provided password with the saved hash. Use the bcrypt
-	// comparison function so it is cryptographically secure.
 	if err := bcrypt.CompareHashAndPassword(usr.PasswordHash, []byte(password)); err != nil {
 		return User{}, ErrAuthenticationFailure
 	}
-
-	// If we are this far the request is valid. Create some claims for the user
-	// and generate their token.
-	// claims := auth.Claims{
-	// 	RegisteredClaims: jwt.RegisteredClaims{
-	// 		Issuer:    "service project",
-	// 		Subject:   dbUsr.ID,
-	// 		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(time.Hour)),
-	// 		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-	// 	},
-	// 	Roles: dbUsr.Roles,
-	// }
 
 	return usr, nil
 }

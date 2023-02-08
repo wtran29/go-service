@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"net/mail"
 	"runtime/debug"
+	"testing"
+	"time"
+
 	"service/business/core/user"
 	"service/business/core/user/stores/usercache"
 	"service/business/core/user/stores/userdb"
 	"service/business/data/dbtest"
 	"service/foundation/docker"
-	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -49,14 +50,15 @@ func Test_User(t *testing.T) {
 		t.Logf("\tTest %d:\tWhen handling a single User.", testID)
 		{
 			ctx := context.Background()
-			email, err := mail.ParseAddress("wtran@example.com")
+
+			email, err := mail.ParseAddress("bill@ardanlabs.com")
 			if err != nil {
 				t.Fatalf("\t%s\tTest %d:\tShould be able to parse email: %s.", dbtest.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould be able to parse email.", dbtest.Success, testID)
 
 			nu := user.NewUser{
-				Name:            "William Tran",
+				Name:            "Bill Kennedy",
 				Email:           *email,
 				Roles:           []string{user.RoleAdmin},
 				Password:        "gophers",
@@ -154,6 +156,72 @@ func Test_User(t *testing.T) {
 				t.Fatalf("\t%s\tTest %d:\tShould NOT be able to retrieve user : %s.", dbtest.Failed, testID, err)
 			}
 			t.Logf("\t%s\tTest %d:\tShould NOT be able to retrieve user.", dbtest.Success, testID)
+		}
+	}
+}
+
+func Test_PagingUser(t *testing.T) {
+	log, db, teardown := dbtest.NewUnit(t, c, "testpaging")
+	defer func() {
+		if r := recover(); r != nil {
+			t.Log(r)
+			t.Error(string(debug.Stack()))
+		}
+		teardown()
+	}()
+
+	core := user.NewCore(userdb.NewStore(log, db))
+
+	t.Log("Given the need to page through User records.")
+	{
+		testID := 0
+		t.Logf("\tTest %d:\tWhen paging through 2 users.", testID)
+		{
+			ctx := context.Background()
+
+			name := "User Gopher"
+			users1, err := core.Query(ctx, user.QueryFilter{Name: &name}, user.DefaultOrderBy, 1, 1)
+			if err != nil {
+				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve user %q : %s.", dbtest.Failed, testID, name, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould be able to retrieve user %q.", dbtest.Success, testID, name)
+
+			if len(users1) != 1 && users1[0].Name == name {
+				t.Fatalf("\t%s\tTest %d:\tShould have a single user for %q : %s.", dbtest.Failed, testID, name, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould have a single user.", dbtest.Success, testID)
+
+			name = "Admin Gopher"
+			users2, err := core.Query(ctx, user.QueryFilter{Name: &name}, user.DefaultOrderBy, 1, 1)
+			if err != nil {
+				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve user %q : %s.", dbtest.Failed, testID, name, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould be able to retrieve users %q.", dbtest.Success, testID, name)
+
+			if len(users2) != 1 && users2[0].Name == name {
+				t.Fatalf("\t%s\tTest %d:\tShould have a single user for %q : %s.", dbtest.Failed, testID, name, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould have a single user.", dbtest.Success, testID)
+
+			users3, err := core.Query(ctx, user.QueryFilter{}, user.DefaultOrderBy, 1, 2)
+			if err != nil {
+				t.Fatalf("\t%s\tTest %d:\tShould be able to retrieve 2 users for page 1 : %s.", dbtest.Failed, testID, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould be able to retrieve 2 users for page 1.", dbtest.Success, testID)
+
+			if len(users3) != 2 {
+				t.Logf("\t\tTest %d:\tgot: %v", testID, len(users3))
+				t.Logf("\t\tTest %d:\texp: %v", testID, 2)
+				t.Fatalf("\t%s\tTest %d:\tShould have 2 users for page 1 : %s.", dbtest.Failed, testID, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould have 2 users for page 1.", dbtest.Success, testID)
+
+			if users3[0].ID == users3[1].ID {
+				t.Logf("\t\tTest %d:\tUser1: %v", testID, users3[0].ID)
+				t.Logf("\t\tTest %d:\tUser2: %v", testID, users3[1].ID)
+				t.Fatalf("\t%s\tTest %d:\tShould have different users : %s.", dbtest.Failed, testID, err)
+			}
+			t.Logf("\t%s\tTest %d:\tShould have different users.", dbtest.Success, testID)
 		}
 	}
 }

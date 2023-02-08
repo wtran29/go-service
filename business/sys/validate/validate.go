@@ -2,11 +2,8 @@
 package validate
 
 import (
-	"errors"
 	"reflect"
 	"strings"
-
-	"github.com/google/uuid"
 
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
@@ -64,18 +61,5 @@ func Check(val any) error {
 		return fields
 	}
 
-	return nil
-}
-
-// GenerateID generate a unique id for entities.
-func GenerateID() string {
-	return uuid.NewString()
-}
-
-// CheckID validates that the format of an id is valid.
-func CheckID(id string) error {
-	if _, err := uuid.Parse(id); err != nil {
-		return errors.New("ID is not in its proper form")
-	}
 	return nil
 }

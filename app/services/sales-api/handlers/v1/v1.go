@@ -5,10 +5,10 @@ package v1
 import (
 	"net/http"
 
-	// "service/app/services/sales-api/handlers/v1/productgrp"
+	"service/app/services/sales-api/handlers/v1/productgrp"
 	"service/app/services/sales-api/handlers/v1/usergrp"
-	// "service/business/core/product"
-	// "service/business/core/product/stores/productdb"
+	"service/business/core/product"
+	"service/business/core/product/stores/productdb"
 	"service/business/core/user"
 	"service/business/core/user/stores/usercache"
 	"service/business/core/user/stores/userdb"
@@ -44,5 +44,15 @@ func Routes(app *web.App, cfg Config) {
 	app.Handle(http.MethodPost, version, "/users", ugh.Create, authen, admin)
 	app.Handle(http.MethodPut, version, "/users/:id", ugh.Update, authen, admin)
 	app.Handle(http.MethodDelete, version, "/users/:id", ugh.Delete, authen, admin)
+
+	pgh := productgrp.Handlers{
+		Product: product.NewCore(productdb.NewStore(cfg.Log, cfg.DB)),
+		Auth:    cfg.Auth,
+	}
+	app.Handle(http.MethodGet, version, "/products/:page/:rows", pgh.Query, authen)
+	app.Handle(http.MethodGet, version, "/products/:id", pgh.QueryByID, authen)
+	app.Handle(http.MethodPost, version, "/products", pgh.Create, authen)
+	app.Handle(http.MethodPut, version, "/products/:id", pgh.Update, authen)
+	app.Handle(http.MethodDelete, version, "/products/:id", pgh.Delete, authen)
 
 }

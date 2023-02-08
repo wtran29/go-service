@@ -1,4 +1,4 @@
-// Package logger provides a convience function to constructing a logger
+// Package logger provides a convenience function to constructing a logger
 // for use. This is required not just for applications but for testing.
 package logger
 
@@ -8,14 +8,19 @@ import (
 )
 
 // New constructs a Sugared Logger that writes to stdout and
-// provides human readable timestamps.
-func New(service string) (*zap.SugaredLogger, error) {
+// provides human-readable timestamps.
+func New(service string, outputPaths ...string) (*zap.SugaredLogger, error) {
 	config := zap.NewProductionConfig()
-	config.OutputPaths = []string{"stdout"}
+
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	config.DisableStacktrace = true
 	config.InitialFields = map[string]any{
 		"service": service,
+	}
+
+	config.OutputPaths = []string{"stdout"}
+	if outputPaths != nil {
+		config.OutputPaths = outputPaths
 	}
 
 	log, err := config.Build(zap.WithCaller(true))

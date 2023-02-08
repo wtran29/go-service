@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"service/business/sys/validate"
+	"service/business/web/auth"
 	webv1 "service/business/web/v1"
 	"service/foundation/web"
 
@@ -23,16 +24,20 @@ func Errors(log *zap.SugaredLogger) web.Middleware {
 		h := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			// If the context is missing this value, request the service
 			// to be shutdown gracefully.
-			v, err := web.GetValues(ctx)
-			if err != nil {
-				return web.NewShutdownError("web value missing from context")
-			}
+			// v, err := web.GetValues(ctx)
+			// if err != nil {
+			// 	return web.NewShutdownError("web value missing from context")
+			// }
 
 			// Run the next handler and catch any propagated error.
 			if err := handler(ctx, w, r); err != nil {
 
 				// Log the error.
-				log.Errorw("ERROR", "traceid", v.TraceID, "ERROR", err)
+				log.Errorw("ERROR", "trace_id", web.GetTraceID(ctx), "message", err)
+
+				ctx, span := web.AddSpan(ctx, "business.web.v1.mid.error")
+				span.RecordError(err)
+				span.End()
 
 				// Build out the error response.
 				var er webv1.ErrorResponse
@@ -53,6 +58,12 @@ func Errors(log *zap.SugaredLogger) web.Middleware {
 					}
 					status = reqErr.Status
 
+				case auth.IsAuthError(err):
+					er = webv1.ErrorResponse{
+						Error: http.StatusText(http.StatusUnauthorized),
+					}
+					status = http.StatusUnauthorized
+
 				default:
 					er = webv1.ErrorResponse{
 						Error: http.StatusText(http.StatusInternalServerError),
@@ -67,7 +78,7 @@ func Errors(log *zap.SugaredLogger) web.Middleware {
 
 				// If we receive the shutdown err we need to return it
 				// back to the base handler to shutdown the service.
-				if ok := web.IsShutdown(err); ok {
+				if web.IsShutdown(err) {
 					return err
 				}
 			}

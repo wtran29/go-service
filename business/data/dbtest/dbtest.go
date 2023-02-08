@@ -185,7 +185,7 @@ func NewIntegration(t *testing.T, c *docker.Container, dbName string) *Test {
 }
 
 // Token generates an authenticated token for a user.
-func (test *Test) Token(email, pass string) string {
+func (test *Test) Token(email string, pass string) string {
 	test.t.Log("Generating token for test ...")
 
 	addr, _ := mail.ParseAddress(email)

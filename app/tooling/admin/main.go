@@ -30,7 +30,7 @@ type config struct {
 		DisableTLS   bool   `conf:"default:true"`
 	}
 	Vault struct {
-		KeysFolder string `conf:"default:containers/.env/"`
+		KeysFolder string `conf:"default:containers/keys/"`
 		Address    string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
 		Token      string `conf:"default:mytoken,mask"`
 		MountPath  string `conf:"default:secret"`

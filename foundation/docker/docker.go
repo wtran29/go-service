@@ -41,10 +41,6 @@ func StartContainer(image string, port string, args ...string) (*Container, erro
 		Host: net.JoinHostPort(hostIP, hostPort),
 	}
 
-	fmt.Printf("Image:       %s\n", image)
-	fmt.Printf("ContainerID: %s\n", c.ID)
-	fmt.Printf("Host:        %s\n", c.Host)
-
 	return &c, nil
 }
 
@@ -53,12 +49,10 @@ func StopContainer(id string) error {
 	if err := exec.Command("docker", "stop", id).Run(); err != nil {
 		return fmt.Errorf("could not stop container: %w", err)
 	}
-	fmt.Println("Stopped:", id)
 
 	if err := exec.Command("docker", "rm", id, "-v").Run(); err != nil {
 		return fmt.Errorf("could not remove container: %w", err)
 	}
-	fmt.Println("Removed:", id)
 
 	return nil
 }

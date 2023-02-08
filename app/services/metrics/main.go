@@ -12,11 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"service/app/services/metrics/collector"
+	"service/app/services/metrics/publisher"
+	expvarsrv "service/app/services/metrics/publisher/expvar"
+	"service/foundation/logger"
+
 	"github.com/ardanlabs/conf/v3"
-	"github.com/ardanlabs/service/app/services/metrics/collector"
-	"github.com/ardanlabs/service/app/services/metrics/publisher"
-	expvarsrv "github.com/ardanlabs/service/app/services/metrics/publisher/expvar"
-	"github.com/ardanlabs/service/foundation/logger"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 )

@@ -4,12 +4,12 @@ package usercache
 import (
 	"context"
 	"net/mail"
-	"service/business/core/user"
-	"service/business/data/order"
 	"sync"
 
-	"github.com/google/uuid"
+	"service/business/core/user"
+	"service/business/data/order"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -124,7 +124,7 @@ func (s *Store) readCache(key string) (user.User, bool) {
 
 // writeCache performs a safe write to the cache for the specified user.
 func (s *Store) writeCache(usr user.User) {
-	s.mu.Unlock()
+	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.cache[usr.ID.String()] = &usr

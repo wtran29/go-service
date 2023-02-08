@@ -1,8 +1,6 @@
 package main
 
 import (
-	// "github.com/ardanlabs/conf"
-	// "github.com/dimfeld/httptreemux/v5"
 	"context"
 	"errors"
 	"expvar"
@@ -219,7 +217,7 @@ func run(log *zap.SugaredLogger) error {
 	// =========================================================================
 	// Start API Service
 
-	log.Infow("startup", "status", "initializing  V1 API support")
+	log.Infow("startup", "status", "initializing V1 API support")
 
 	// Make a channel to listen for an interrupt or terminate signal from the OS.
 	// Use a buffered channel because the signal package requires it.
