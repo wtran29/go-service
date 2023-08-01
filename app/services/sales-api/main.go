@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	"service/app/services/sales-api/handlers"
-	"service/business/sys/database"
-	"service/business/web/auth"
-	"service/business/web/v1/debug"
-	"service/foundation/logger"
-	"service/foundation/vault"
+	"github.com/wtran29/go-service/app/services/sales-api/handlers"
+	"github.com/wtran29/go-service/business/sys/database"
+	"github.com/wtran29/go-service/business/web/auth"
+	"github.com/wtran29/go-service/business/web/v1/debug"
+	"github.com/wtran29/go-service/foundation/logger"
+	"github.com/wtran29/go-service/foundation/vault"
 
 	"github.com/ardanlabs/conf/v3"
 	"go.opentelemetry.io/otel"
