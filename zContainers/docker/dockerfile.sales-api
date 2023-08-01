@@ -1,13 +1,23 @@
 # Build the Go binary
-FROM golang:1.19 as build_sales-api
+# By default CGO_ENABLED is set to 1 so we can use C libraries
+# However, this is set to 0 to make sure we don't have anything C dependencies attached for testing.
+FROM golang:1.20 as build_sales-api
 ENV CGO_ENABLED 0
 ARG BUILD_REF
+
+# Create the service directory and the copy the module files first and then
+# download the dependencies. If this doesn't change, we won't need to do this
+# again in future builds.
+# RUN mkdir /service
+# COPY go.* /service/
+# WORKDIR /service
+# RUN go mod download
 
 # Copy the source code into the container.
 COPY . /service
 
 # Build the service binary.
-WORKDIR /service/app/tooling/admin
+WORKDIR /service/app/tooling/sales-admin
 RUN go build -ldflags "-X main.build=${BUILD_REF}"
 
 # Build the service binary.
@@ -16,14 +26,14 @@ RUN go build -ldflags "-X main.build=${BUILD_REF}"
 
 
 # Run the Go Binary in Alpine.
-FROM alpine:3.17
+FROM alpine:3.18
 ARG BUILD_DATE
 ARG BUILD_REF
 RUN addgroup -g 1000 -S sales && \
     adduser -u 1000 -h /service -G sales -S sales
-COPY --from=build_sales-api /service/containers/keys/. /service/containers/keys/.
-COPY --from=build_sales-api /service/app/tooling/admin/admin /service/admin
-COPY --from=build_sales-api /service/app/services/sales-api/sales-api /service/sales-api
+COPY --from=build_sales-api --chown=sales:sales /service/zContainers/keys/. /service/zContainers/keys/.
+COPY --from=build_sales-api --chown=sales:sales /service/app/tooling/sales-admin/sales-admin /service/sales-admin
+COPY --from=build_sales-api --chown=sales:sales /service/app/services/sales-api/sales-api /service/sales-api
 WORKDIR /service
 USER sales
 CMD ["./sales-api"]
