@@ -3,8 +3,8 @@
 .reading/
 .dockerignore
 .gitignore
-zarf/docker/
-zarf/k8s/
+zContainers/docker/
+zContainers/k8s/
 CONTRIBUTORS
 LICENSE
 makefile
