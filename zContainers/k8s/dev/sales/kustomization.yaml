@@ -6,7 +6,6 @@ resources:
 patches:
 - path: ./dev-sales-patch-deploy.yaml
 
-
 images:
 - name: service-image
   newName: wtran4hire/service/sales-api
