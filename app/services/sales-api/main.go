@@ -62,7 +62,7 @@ func run(log *zap.SugaredLogger) error {
 	if _, err := maxprocs.Set(opt); err != nil {
 		return fmt.Errorf("maxprocs: %w", err)
 	}
-	log.Infow("startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
+	log.Infow("startup", "GOMAXPROCS", runtime.GOMAXPROCS(0), "BUILD-", build)
 
 	// =========================================================================
 	// Configuration
