@@ -9,7 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dimfeld/httptreemux/v5"
+	// "github.com/dimfeld/httptreemux/v5"
+	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -22,7 +23,7 @@ type Handler func(ctx context.Context, w http.ResponseWriter, r *http.Request) e
 // object for each of our http handlers. Feel free to add any configuration
 // data/logic on this App struct.
 type App struct {
-	mux      *httptreemux.ContextMux
+	mux      *chi.Mux
 	otmux    http.Handler
 	shutdown chan os.Signal
 	mw       []Middleware
@@ -30,7 +31,7 @@ type App struct {
 }
 
 // NewApp creates an App value that handle a set of routes for the application.
-func NewApp(shutdown chan os.Signal, tracer trace.Tracer, mw ...Middleware) *App {
+func NewApp(shutdown chan os.Signal, mw ...Middleware) *App {
 
 	// Create an OpenTelemetry HTTP Handler which wraps our router. This will start
 	// the initial span and annotate it with information about the request/response.
@@ -39,14 +40,14 @@ func NewApp(shutdown chan os.Signal, tracer trace.Tracer, mw ...Middleware) *App
 	// parent if a client request includes the appropriate headers.
 	// https://w3c.github.io/trace-context/
 
-	mux := httptreemux.NewContextMux()
+	mux := chi.NewMux()
 
 	return &App{
 		mux:      mux,
 		otmux:    otelhttp.NewHandler(mux, "request"),
 		shutdown: shutdown,
 		mw:       mw,
-		tracer:   tracer,
+		// tracer:   tracer,
 	}
 }
 
@@ -66,6 +67,15 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Handle sets a handler function for a given HTTP method and path pair
 // to the application server mux.
+// func (a *App) Handle(method string, group string, path string, handler Handler, mw ...Middleware) {
+// 	// handler = wrapMiddleware(mw, handler)
+// 	// handler = wrapMiddleware(a.mw, handler)
+
+// 	a.handle(method, group, path, handler)
+// }
+
+// Handle sets a handler function for a given HTTP method and path pair
+// to the application server mux.
 func (a *App) Handle(method string, group string, path string, handler Handler, mw ...Middleware) {
 
 	// First wrap handler specific middleware around this handler.
@@ -74,7 +84,7 @@ func (a *App) Handle(method string, group string, path string, handler Handler, 
 	// Add the application's general middleware to the handler chain.
 	handler = wrapMiddleware(a.mw, handler)
 
-	// The function to execute for each request.
+	// Define the handle function to execute for each request.
 	h := func(w http.ResponseWriter, r *http.Request) {
 
 		// Pull the context from the request and
@@ -106,7 +116,7 @@ func (a *App) Handle(method string, group string, path string, handler Handler, 
 		finalPath = "/" + group + path
 	}
 
-	a.mux.Handle(method, finalPath, h)
+	a.mux.MethodFunc(method, finalPath, h)
 }
 
 // validateShutdown validates the error for special conditions that do not

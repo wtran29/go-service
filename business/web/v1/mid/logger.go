@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"service/foundation/web"
+	"github.com/wtran29/go-service/foundation/web"
 
 	"go.uber.org/zap"
 )
