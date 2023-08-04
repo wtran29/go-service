@@ -2,6 +2,7 @@ package mid
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -23,6 +24,11 @@ func Logger(log *zap.SugaredLogger) web.Middleware {
 			// If the context is missing this value, request the service
 			// to be shutdown gracefully.
 			v := web.GetValues(ctx)
+
+			path := r.URL.Path
+			if r.URL.RawQuery != "" {
+				path = fmt.Sprintf("%s?%s", path, r.URL.RawQuery)
+			}
 
 			log.Infow("request started", "trace_id", v.TraceID, "method", r.Method, "path", r.URL.Path,
 				"remoteaddr", r.RemoteAddr)

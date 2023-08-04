@@ -4,10 +4,10 @@ import (
 	"context"
 	"net/http"
 
-	"service/business/sys/validate"
-	"service/business/web/auth"
-	webv1 "service/business/web/v1"
-	"service/foundation/web"
+	"github.com/wtran29/go-service/business/sys/validate"
+	"github.com/wtran29/go-service/business/web/auth"
+	v1 "github.com/wtran29/go-service/business/web/v1"
+	"github.com/wtran29/go-service/foundation/web"
 
 	"go.uber.org/zap"
 )
@@ -40,32 +40,32 @@ func Errors(log *zap.SugaredLogger) web.Middleware {
 				span.End()
 
 				// Build out the error response.
-				var er webv1.ErrorResponse
+				var er v1.ErrorResponse
 				var status int
 				switch {
 				case validate.IsFieldErrors(err):
 					fieldErrors := validate.GetFieldErrors(err)
-					er = webv1.ErrorResponse{
+					er = v1.ErrorResponse{
 						Error:  "data validation error",
 						Fields: fieldErrors.Fields(),
 					}
 					status = http.StatusBadRequest
 
-				case webv1.IsRequestError(err):
-					reqErr := webv1.GetRequestError(err)
-					er = webv1.ErrorResponse{
+				case v1.IsRequestError(err):
+					reqErr := v1.GetRequestError(err)
+					er = v1.ErrorResponse{
 						Error: reqErr.Error(),
 					}
 					status = reqErr.Status
 
 				case auth.IsAuthError(err):
-					er = webv1.ErrorResponse{
+					er = v1.ErrorResponse{
 						Error: http.StatusText(http.StatusUnauthorized),
 					}
 					status = http.StatusUnauthorized
 
 				default:
-					er = webv1.ErrorResponse{
+					er = v1.ErrorResponse{
 						Error: http.StatusText(http.StatusInternalServerError),
 					}
 					status = http.StatusInternalServerError
