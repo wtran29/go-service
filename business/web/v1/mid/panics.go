@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"service/business/sys/metrics"
-	"service/foundation/web"
+	"github.com/wtran29/go-service/business/sys/metrics"
+	"github.com/wtran29/go-service/foundation/web"
 )
 
 // Panics recovers from panics and converts the panic to an error so it is

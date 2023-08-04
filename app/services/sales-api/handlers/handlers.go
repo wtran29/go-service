@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"context"
 	"net/http"
 	"os"
 
@@ -40,14 +39,13 @@ type APIMuxConfig struct {
 // APIMux constructs a http.Handler with all application routes defined.
 func APIMux(cfg APIMuxConfig, options ...func(opts *Options)) *web.App {
 
-	app := web.NewApp(cfg.Shutdown, mid.Logger(cfg.Log), mid.Errors(cfg.Log))
+	app := web.NewApp(cfg.Shutdown, mid.Logger(cfg.Log), mid.Errors(cfg.Log), mid.Panics())
+	// testHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	// 	testgrp.Test(ctx, w, r)
+	// 	return nil
+	// }
 
-	testHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		testgrp.Test(ctx, w, r)
-		return nil
-	}
-
-	app.Handle(http.MethodGet, "", "/test", testHandler)
+	app.Handle(http.MethodGet, "/test", testgrp.Test)
 
 	// var opts Options
 	// for _, option := range options {

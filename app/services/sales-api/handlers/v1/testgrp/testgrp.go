@@ -2,9 +2,11 @@
 package testgrp
 
 import (
-	"encoding/json"
+	"context"
+	"math/rand"
 	"net/http"
 
+	"github.com/wtran29/go-service/foundation/web"
 	"go.uber.org/zap"
 )
 
@@ -14,19 +16,21 @@ type Handlers struct {
 }
 
 // Test handler is for development.
-func Test(w http.ResponseWriter, r *http.Request) {
-	// if n := rand.Intn(100); n%2 == 0 {
-	// 	// return errors.New("untrusted error")
-	// 	return webv1.NewRequestError(errors.New("trusted error"), http.StatusBadRequest)
+func Test(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	if n := rand.Intn(100); n%2 == 0 {
+		// test shutdown error
+		// return errors.New("UNTRUSTED ERROR")
+		// test trusted error
+		// return v1.NewRequestError(errors.New("TRUSTED ERROR"), http.StatusBadRequest)
+		panic("OHHH NOOO PANIC")
 
-	// }
+	}
+
 	status := struct {
 		Status string
 	}{
 		Status: "OK",
 	}
 
-	json.NewEncoder(w).Encode(status)
-
-	// return web.Respond(ctx, w, status, http.StatusOK)
+	return web.Respond(ctx, w, status, http.StatusOK)
 }
