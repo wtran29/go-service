@@ -8,13 +8,12 @@ auth {
 }
 
 jwt_valid := valid {
-	[valid, header, payload] := decoded_jwt
+	[valid, header, payload] := verify_jwt
 }
 
-decoded_jwt := [valid, header, payload] {
-	[valid, header, payload] := io.jwt.decode_verify(input.Token, {
-		"cert": input.Key,
-		"alg": "RS256",
-        "iss": "service project",
-	})
-}
+verify_jwt := io.jwt.decode_verify(input.Token, {
+        "cert": input.Key,
+        "iss": input.ISS,
+	}
+)
+
