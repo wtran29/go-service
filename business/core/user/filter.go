@@ -1,38 +1,55 @@
 package user
 
 import (
+	"fmt"
 	"net/mail"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/wtran29/go-service/business/sys/validate"
 )
 
 // QueryFilter holds the available fields filters to search
 // for schedules on the store.
 type QueryFilter struct {
-	ID    *uuid.UUID    `validate:"omitempty,uuid4"`
-	Name  *string       `validate:"omitempty,min=3"`
-	Email *mail.Address `validate:"omitempty,email"`
+	ID               *uuid.UUID    `validate:"omitempty"`
+	Name             *string       `validate:"omitempty,min=3"`
+	Email            *mail.Address `validate:"omitempty"`
+	StartCreatedDate *time.Time    `validate:"omitempty"`
+	EndCreatedDate   *time.Time    `validate:"omitempty"`
 }
 
-// ByID sets the ID field of the QueryFilter value.
-func (f *QueryFilter) ByID(id uuid.UUID) {
-	var zero uuid.UUID
-	if id != zero {
-		f.ID = &id
+// Validate checks the data in the model is considered clean.
+func (qf *QueryFilter) Validate() error {
+	if err := validate.Check(qf); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
+	return nil
 }
 
-// ByName sets the Name field of the QueryFilter value.
-func (f *QueryFilter) ByName(name string) {
-	if name != "" {
-		f.Name = &name
-	}
+// WithUserID sets the ID field of the QueryFilter value.
+func (qf *QueryFilter) WithUserID(userID uuid.UUID) {
+	qf.ID = &userID
 }
 
-// ByEmail sets the Email field of the QueryFilter value.
-func (f *QueryFilter) ByEmail(email mail.Address) {
-	var zero mail.Address
-	if email != zero {
-		f.Email = &email
-	}
+// WithName sets the Name field of the QueryFilter value.
+func (qf *QueryFilter) WithName(name string) {
+	qf.Name = &name
+}
+
+// WithEmail sets the Email field of the QueryFilter value.
+func (qf *QueryFilter) WithEmail(email mail.Address) {
+	qf.Email = &email
+}
+
+// WithStartDateCreated sets the DateCreated field of the QueryFilter value.
+func (qf *QueryFilter) WithStartDateCreated(startDate time.Time) {
+	d := startDate.UTC()
+	qf.StartCreatedDate = &d
+}
+
+// WithEndCreatedDate sets the DateCreated field of the QueryFilter value.
+func (qf *QueryFilter) WithEndCreatedDate(endDate time.Time) {
+	d := endDate.UTC()
+	qf.EndCreatedDate = &d
 }
