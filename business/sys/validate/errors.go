@@ -14,6 +14,16 @@ type FieldError struct {
 // FieldErrors represents a collection of field errors.
 type FieldErrors []FieldError
 
+// NewFieldsError creates an fields error.
+func NewFieldsError(field string, err error) error {
+	return FieldErrors{
+		{
+			Field: field,
+			Error: err.Error(),
+		},
+	}
+}
+
 // Error implements the error interface.
 func (fe FieldErrors) Error() string {
 	d, err := json.Marshal(fe)
