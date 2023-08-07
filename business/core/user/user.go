@@ -10,8 +10,7 @@ import (
 	"net/mail"
 	"time"
 
-	"service/business/data/order"
-	"service/business/sys/validate"
+	"github.com/wtran29/go-service/business/data/order"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -34,28 +33,32 @@ type Storer interface {
 	Update(ctx context.Context, usr User) error
 	Delete(ctx context.Context, usr User) error
 	Query(ctx context.Context, filter QueryFilter, orderBy order.By, pageNumber int, rowsPerPage int) ([]User, error)
+	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
+	QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
 }
+
+// =============================================================================
 
 // Core manages the set of APIs for user access.
 type Core struct {
 	storer Storer
+	// evnCore *event.Core
+	// log     *logger.Logger
 }
 
 // NewCore constructs a core for user api access.
 func NewCore(storer Storer) *Core {
 	return &Core{
 		storer: storer,
+		// evnCore: evnCore,
+		// log:     log,
 	}
 }
 
 // Create inserts a new user into the database.
 func (c *Core) Create(ctx context.Context, nu NewUser) (User, error) {
-	if err := validate.Check(nu); err != nil {
-		return User{}, fmt.Errorf("validating data: %w", err)
-	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(nu.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return User{}, fmt.Errorf("generating password hash: %w", err)
@@ -69,21 +72,14 @@ func (c *Core) Create(ctx context.Context, nu NewUser) (User, error) {
 		Email:        nu.Email,
 		PasswordHash: hash,
 		Roles:        nu.Roles,
+		Department:   nu.Department,
 		Enabled:      true,
 		DateCreated:  now,
 		DateUpdated:  now,
 	}
 
-	// This provides an example of how to execute a transaction if required.
-	tran := func(s Storer) error {
-		if err := s.Create(ctx, usr); err != nil {
-			return fmt.Errorf("create: %w", err)
-		}
-		return nil
-	}
-
-	if err := c.storer.WithinTran(ctx, tran); err != nil {
-		return User{}, fmt.Errorf("tran: %w", err)
+	if err := c.storer.Create(ctx, usr); err != nil {
+		return User{}, fmt.Errorf("create: %w", err)
 	}
 
 	return usr, nil
@@ -91,9 +87,6 @@ func (c *Core) Create(ctx context.Context, nu NewUser) (User, error) {
 
 // Update replaces a user document in the database.
 func (c *Core) Update(ctx context.Context, usr User, uu UpdateUser) (User, error) {
-	if err := validate.Check(uu); err != nil {
-		return User{}, fmt.Errorf("validating data: %w", err)
-	}
 
 	if uu.Name != nil {
 		usr.Name = *uu.Name
@@ -110,6 +103,9 @@ func (c *Core) Update(ctx context.Context, usr User, uu UpdateUser) (User, error
 			return User{}, fmt.Errorf("generating password hash: %w", err)
 		}
 		usr.PasswordHash = pw
+	}
+	if uu.Department != nil {
+		usr.Department = *uu.Department
 	}
 	if uu.Enabled != nil {
 		usr.Enabled = *uu.Enabled
@@ -134,14 +130,6 @@ func (c *Core) Delete(ctx context.Context, usr User) error {
 
 // Query retrieves a list of existing users from the database.
 func (c *Core) Query(ctx context.Context, filter QueryFilter, orderBy order.By, pageNumber int, rowsPerPage int) ([]User, error) {
-	if err := validate.Check(filter); err != nil {
-		return nil, fmt.Errorf("validating filter: %w", err)
-	}
-
-	if err := ordering.Check(orderBy); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidOrder, err.Error())
-	}
-
 	users, err := c.storer.Query(ctx, filter, orderBy, pageNumber, rowsPerPage)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
@@ -150,11 +138,26 @@ func (c *Core) Query(ctx context.Context, filter QueryFilter, orderBy order.By, 
 	return users, nil
 }
 
+// Count returns the total number of users in the store.
+func (c *Core) Count(ctx context.Context, filter QueryFilter) (int, error) {
+	return c.storer.Count(ctx, filter)
+}
+
 // QueryByID gets the specified user from the database.
 func (c *Core) QueryByID(ctx context.Context, userID uuid.UUID) (User, error) {
 	user, err := c.storer.QueryByID(ctx, userID)
 	if err != nil {
 		return User{}, fmt.Errorf("query: %w", err)
+	}
+
+	return user, nil
+}
+
+// QueryByIDs gets the specified user from the database.
+func (c *Core) QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]User, error) {
+	user, err := c.storer.QueryByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("query: userIDs[%s]: %w", userIDs, err)
 	}
 
 	return user, nil
@@ -174,9 +177,9 @@ func (c *Core) QueryByEmail(ctx context.Context, email mail.Address) (User, erro
 // success it returns a Claims User representing this user. The claims can be
 // used to generate a token for future authentication.
 func (c *Core) Authenticate(ctx context.Context, email mail.Address, password string) (User, error) {
-	usr, err := c.storer.QueryByEmail(ctx, email)
+	usr, err := c.QueryByEmail(ctx, email)
 	if err != nil {
-		return User{}, fmt.Errorf("query: %w", err)
+		return User{}, fmt.Errorf("query: email[%s]: %w", email, err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword(usr.PasswordHash, []byte(password)); err != nil {
