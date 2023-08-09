@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"service/foundation/web"
+	"github.com/wtran29/go-service/foundation/web"
 )
 
 // Cors sets the response headers needed for Cross-Origin Resource Sharing

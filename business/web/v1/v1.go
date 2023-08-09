@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"service/business/data/order"
+	"github.com/wtran29/go-service/business/data/order"
 )
 
 // ErrorResponse is the form used for API responses from failures in the API.

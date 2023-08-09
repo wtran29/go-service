@@ -6,14 +6,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/wtran29/go-service/foundation/logger"
 	"github.com/wtran29/go-service/foundation/web"
-
-	"go.uber.org/zap"
 )
 
 // Logger writes some information about the request to the logs in the
 // format: TraceID : (200) GET /foo -> IP ADDR (latency)
-func Logger(log *zap.SugaredLogger) web.Middleware {
+func Logger(log *logger.Logger) web.Middleware {
 
 	// This is the actual middleware function to be executed.
 	m := func(handler web.Handler) web.Handler {
@@ -30,13 +29,13 @@ func Logger(log *zap.SugaredLogger) web.Middleware {
 				path = fmt.Sprintf("%s?%s", path, r.URL.RawQuery)
 			}
 
-			log.Infow("request started", "trace_id", v.TraceID, "method", r.Method, "path", r.URL.Path,
+			log.Info(ctx, "request started", "method", r.Method, "path", path,
 				"remoteaddr", r.RemoteAddr)
 
 			// Call the next handler.
 			err := handler(ctx, w, r)
 
-			log.Infow("request completed", "trace_id", v.TraceID, "method", r.Method, "path", r.URL.Path,
+			log.Info(ctx, "request completed", "method", r.Method, "path", path,
 				"remoteaddr", r.RemoteAddr, "statuscode", v.StatusCode, "since", time.Since(v.Now))
 
 			// Return the error so it can be handled further up the chain.

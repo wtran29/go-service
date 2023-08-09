@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"github.com/wtran29/go-service/business/sys/metrics"
+	"github.com/wtran29/go-service/business/web/metrics"
 	"github.com/wtran29/go-service/foundation/web"
 )
 
