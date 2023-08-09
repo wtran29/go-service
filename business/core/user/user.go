@@ -10,7 +10,10 @@ import (
 	"net/mail"
 	"time"
 
+	"github.com/wtran29/go-service/business/core/event"
 	"github.com/wtran29/go-service/business/data/order"
+	"github.com/wtran29/go-service/business/data/transaction"
+	"github.com/wtran29/go-service/foundation/logger"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -25,17 +28,19 @@ var (
 	ErrInvalidOrder          = errors.New("validating order by")
 )
 
+// =============================================================================
+
 // Storer interface declares the behavior this package needs to perists and
 // retrieve data.
 type Storer interface {
-	WithinTran(ctx context.Context, fn func(s Storer) error) error
+	ExecuteUnderTransaction(tx transaction.Transaction) (Storer, error)
 	Create(ctx context.Context, usr User) error
 	Update(ctx context.Context, usr User) error
 	Delete(ctx context.Context, usr User) error
 	Query(ctx context.Context, filter QueryFilter, orderBy order.By, pageNumber int, rowsPerPage int) ([]User, error)
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
-	QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]User, error)
+	QueryByIDs(ctx context.Context, userID []uuid.UUID) ([]User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
 }
 
@@ -43,25 +48,52 @@ type Storer interface {
 
 // Core manages the set of APIs for user access.
 type Core struct {
+	storer  Storer
+	evnCore *event.Core
+	log     *logger.Logger
+}
+
+type TestCore struct {
 	storer Storer
-	// evnCore *event.Core
-	// log     *logger.Logger
+}
+
+func TestNewCore(storer Storer) *TestCore {
+	return &TestCore{
+		storer: storer,
+	}
 }
 
 // NewCore constructs a core for user api access.
-func NewCore(storer Storer) *Core {
+func NewCore(log *logger.Logger, evnCore *event.Core, storer Storer) *Core {
 	return &Core{
-		storer: storer,
-		// evnCore: evnCore,
-		// log:     log,
+		storer:  storer,
+		evnCore: evnCore,
+		log:     log,
 	}
+}
+
+// ExecuteUnderTransaction constructs a new Core value that will use the
+// specified transaction in any store related calls.
+func (c *Core) ExecuteUnderTransaction(tx transaction.Transaction) (*Core, error) {
+	trS, err := c.storer.ExecuteUnderTransaction(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	c = &Core{
+		log:     c.log,
+		storer:  trS,
+		evnCore: c.evnCore,
+	}
+
+	return c, nil
 }
 
 // Create inserts a new user into the database.
 func (c *Core) Create(ctx context.Context, nu NewUser) (User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(nu.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return User{}, fmt.Errorf("generating password hash: %w", err)
+		return User{}, fmt.Errorf("generatefrompassword: %w", err)
 	}
 
 	now := time.Now()
@@ -87,7 +119,6 @@ func (c *Core) Create(ctx context.Context, nu NewUser) (User, error) {
 
 // Update replaces a user document in the database.
 func (c *Core) Update(ctx context.Context, usr User, uu UpdateUser) (User, error) {
-
 	if uu.Name != nil {
 		usr.Name = *uu.Name
 	}
@@ -100,7 +131,7 @@ func (c *Core) Update(ctx context.Context, usr User, uu UpdateUser) (User, error
 	if uu.Password != nil {
 		pw, err := bcrypt.GenerateFromPassword([]byte(*uu.Password), bcrypt.DefaultCost)
 		if err != nil {
-			return User{}, fmt.Errorf("generating password hash: %w", err)
+			return User{}, fmt.Errorf("generatefrompassword: %w", err)
 		}
 		usr.PasswordHash = pw
 	}
@@ -114,6 +145,10 @@ func (c *Core) Update(ctx context.Context, usr User, uu UpdateUser) (User, error
 
 	if err := c.storer.Update(ctx, usr); err != nil {
 		return User{}, fmt.Errorf("update: %w", err)
+	}
+
+	if err := c.evnCore.SendEvent(ctx, uu.UpdatedEvent(usr.ID)); err != nil {
+		return User{}, fmt.Errorf("failed to send a `%s` event: %w", EventUpdated, err)
 	}
 
 	return usr, nil
@@ -147,7 +182,7 @@ func (c *Core) Count(ctx context.Context, filter QueryFilter) (int, error) {
 func (c *Core) QueryByID(ctx context.Context, userID uuid.UUID) (User, error) {
 	user, err := c.storer.QueryByID(ctx, userID)
 	if err != nil {
-		return User{}, fmt.Errorf("query: %w", err)
+		return User{}, fmt.Errorf("query: userID[%s]: %w", userID, err)
 	}
 
 	return user, nil
@@ -167,11 +202,13 @@ func (c *Core) QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]User, err
 func (c *Core) QueryByEmail(ctx context.Context, email mail.Address) (User, error) {
 	user, err := c.storer.QueryByEmail(ctx, email)
 	if err != nil {
-		return User{}, fmt.Errorf("query: %w", err)
+		return User{}, fmt.Errorf("query: email[%s]: %w", email, err)
 	}
 
 	return user, nil
 }
+
+// =============================================================================
 
 // Authenticate finds a user by their email and verifies their password. On
 // success it returns a Claims User representing this user. The claims can be
@@ -183,7 +220,7 @@ func (c *Core) Authenticate(ctx context.Context, email mail.Address, password st
 	}
 
 	if err := bcrypt.CompareHashAndPassword(usr.PasswordHash, []byte(password)); err != nil {
-		return User{}, ErrAuthenticationFailure
+		return User{}, fmt.Errorf("comparehashandpassword: %w", ErrAuthenticationFailure)
 	}
 
 	return usr, nil
