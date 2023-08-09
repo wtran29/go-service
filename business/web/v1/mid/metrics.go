@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"service/business/sys/metrics"
-	"service/foundation/web"
+	"github.com/wtran29/go-service/business/web/metrics"
+	"github.com/wtran29/go-service/foundation/web"
 )
 
 // Metrics updates program counters.
