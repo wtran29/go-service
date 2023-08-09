@@ -2,17 +2,17 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"os"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/wtran29/go-service/app/services/sales-api/handlers/v1/testgrp"
+	v1 "github.com/wtran29/go-service/app/services/sales-api/handlers/v1"
 	"github.com/wtran29/go-service/business/web/auth"
 	"github.com/wtran29/go-service/business/web/v1/mid"
+	"github.com/wtran29/go-service/foundation/logger"
 	"github.com/wtran29/go-service/foundation/web"
 	"go.opentelemetry.io/otel/trace"
-
-	"go.uber.org/zap"
 )
 
 // Options represent optional parameters.
@@ -29,64 +29,57 @@ func WithCORS(origin string) func(opts *Options) {
 
 // APIMuxConfig contains all the mandatory systems required by handlers.
 type APIMuxConfig struct {
+	Build    string
 	Shutdown chan os.Signal
-	Log      *zap.SugaredLogger
+	Log      *logger.Logger
 	Auth     *auth.Auth
 	DB       *sqlx.DB
 	Tracer   trace.Tracer
 }
 
 // APIMux constructs a http.Handler with all application routes defined.
-func APIMux(cfg APIMuxConfig, options ...func(opts *Options)) *web.App {
+func APIMux(cfg APIMuxConfig, options ...func(opts *Options)) http.Handler {
+	var opts Options
+	for _, option := range options {
+		option(&opts)
+	}
 
-	app := web.NewApp(cfg.Shutdown, mid.Logger(cfg.Log), mid.Errors(cfg.Log), mid.Panics())
-	// testHandler := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	// 	testgrp.Test(ctx, w, r)
-	// 	return nil
-	// }
+	var app *web.App
 
-	app.Handle(http.MethodGet, "/test", testgrp.Test)
+	if opts.corsOrigin != "" {
+		app = web.NewApp(
+			cfg.Shutdown,
+			cfg.Tracer,
+			mid.Logger(cfg.Log),
+			mid.Errors(cfg.Log),
+			mid.Metrics(),
+			mid.Cors(opts.corsOrigin),
+			mid.Panics(),
+		)
 
-	// var opts Options
-	// for _, option := range options {
-	// 	option(&opts)
-	// }
+		h := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return nil
+		}
+		app.Handle(http.MethodOptions, "", "/*", h, mid.Cors(opts.corsOrigin))
+	}
 
-	// var app *web.App
+	if app == nil {
+		app = web.NewApp(
+			cfg.Shutdown,
+			cfg.Tracer,
+			mid.Logger(cfg.Log),
+			mid.Errors(cfg.Log),
+			mid.Metrics(),
+			mid.Panics(),
+		)
+	}
 
-	// if opts.corsOrigin != "" {
-	// 	app = web.NewApp(
-	// 		cfg.Shutdown,
-	// 		cfg.Tracer,
-	// 		mid.Logger(cfg.Log),
-	// 		mid.Errors(cfg.Log),
-	// 		mid.Metrics(),
-	// 		mid.Cors(opts.corsOrigin),
-	// 		mid.Panics(),
-	// 	)
-
-	// 	h := func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	// 		return nil
-	// 	}
-	// 	app.Handle(http.MethodOptions, "", "/*", h, mid.Cors(opts.corsOrigin))
-	// }
-
-	// if app == nil {
-	// 	app = web.NewApp(
-	// 		cfg.Shutdown,
-	// 		cfg.Tracer,
-	// 		mid.Logger(cfg.Log),
-	// 		mid.Errors(cfg.Log),
-	// 		mid.Metrics(),
-	// 		mid.Panics(),
-	// 	)
-	// }
-
-	// v1.Routes(app, v1.Config{
-	// 	Log:  cfg.Log,
-	// 	Auth: cfg.Auth,
-	// 	DB:   cfg.DB,
-	// })
+	v1.Routes(app, v1.Config{
+		Build: cfg.Build,
+		Log:   cfg.Log,
+		Auth:  cfg.Auth,
+		DB:    cfg.DB,
+	})
 
 	return app
 }

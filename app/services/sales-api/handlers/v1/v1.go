@@ -5,54 +5,81 @@ package v1
 import (
 	"net/http"
 
-	"service/app/services/sales-api/handlers/v1/productgrp"
-	"service/app/services/sales-api/handlers/v1/usergrp"
-	"service/business/core/product"
-	"service/business/core/product/stores/productdb"
-	"service/business/core/user"
-	"service/business/core/user/stores/usercache"
-	"service/business/core/user/stores/userdb"
-	"service/business/web/auth"
-	"service/business/web/v1/mid"
-	"service/foundation/web"
+	"github.com/wtran29/go-service/app/services/sales-api/handlers/v1/checkgrp"
+	"github.com/wtran29/go-service/app/services/sales-api/handlers/v1/productgrp"
+	"github.com/wtran29/go-service/app/services/sales-api/handlers/v1/trangrp"
+	"github.com/wtran29/go-service/app/services/sales-api/handlers/v1/usergrp"
+	"github.com/wtran29/go-service/business/core/event"
+	"github.com/wtran29/go-service/business/core/product"
+	"github.com/wtran29/go-service/business/core/product/stores/productdb"
+	"github.com/wtran29/go-service/business/core/user"
+	"github.com/wtran29/go-service/business/core/user/stores/usercache"
+	"github.com/wtran29/go-service/business/core/user/stores/userdb"
+	"github.com/wtran29/go-service/business/core/usersummary"
+	"github.com/wtran29/go-service/business/core/usersummary/stores/usersummarydb"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
+	"github.com/wtran29/go-service/business/web/auth"
+	"github.com/wtran29/go-service/business/web/v1/mid"
+	"github.com/wtran29/go-service/foundation/logger"
+	"github.com/wtran29/go-service/foundation/web"
 
 	"github.com/jmoiron/sqlx"
-	"go.uber.org/zap"
 )
 
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
-	Log  *zap.SugaredLogger
-	Auth *auth.Auth
-	DB   *sqlx.DB
+	Build string
+	Log   *logger.Logger
+	Auth  *auth.Auth
+	DB    *sqlx.DB
 }
 
 // Routes binds all the version 1 routes.
 func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
+	envCore := event.NewCore(cfg.Log)
+	usrCore := user.NewCore(cfg.Log, envCore, usercache.NewStore(cfg.Log, userdb.NewStore(cfg.Log, cfg.DB)))
+	prdCore := product.NewCore(cfg.Log, envCore, usrCore, productdb.NewStore(cfg.Log, cfg.DB))
+	usmCore := usersummary.NewCore(usersummarydb.NewStore(cfg.Log, cfg.DB))
+
 	authen := mid.Authenticate(cfg.Auth)
-	admin := mid.Authorize(cfg.Auth, auth.RuleAdminOnly)
+	ruleAdmin := mid.Authorize(cfg.Auth, auth.RuleAdminOnly)
+	ruleAdminOrSubject := mid.Authorize(cfg.Auth, auth.RuleAdminOrSubject)
+	tran := mid.ExecuteInTransation(cfg.Log, database.NewBeginner(cfg.DB))
 
-	ugh := usergrp.Handlers{
-		User: user.NewCore(usercache.NewStore(cfg.Log, userdb.NewStore(cfg.Log, cfg.DB))),
-		Auth: cfg.Auth,
-	}
+	// -------------------------------------------------------------------------
+
+	cgh := checkgrp.New(cfg.Build, cfg.DB)
+
+	app.HandleNoMiddleware(http.MethodGet, version, "/readiness", cgh.Readiness)
+	app.HandleNoMiddleware(http.MethodGet, version, "/liveness", cgh.Liveness)
+
+	// -------------------------------------------------------------------------
+
+	ugh := usergrp.New(usrCore, usmCore, cfg.Auth)
+
 	app.Handle(http.MethodGet, version, "/users/token/:kid", ugh.Token)
-	app.Handle(http.MethodGet, version, "/users/:page/:rows", ugh.Query, authen, admin)
-	app.Handle(http.MethodGet, version, "/users/:id", ugh.QueryByID, authen)
-	app.Handle(http.MethodPost, version, "/users", ugh.Create, authen, admin)
-	app.Handle(http.MethodPut, version, "/users/:id", ugh.Update, authen, admin)
-	app.Handle(http.MethodDelete, version, "/users/:id", ugh.Delete, authen, admin)
+	app.Handle(http.MethodGet, version, "/users", ugh.Query, authen, ruleAdmin)
+	app.Handle(http.MethodGet, version, "/users/:user_id", ugh.QueryByID, authen, ruleAdminOrSubject)
+	app.Handle(http.MethodGet, version, "/users/summary", ugh.QuerySummary, authen, ruleAdmin)
+	app.Handle(http.MethodPost, version, "/users", ugh.Create, authen, ruleAdmin)
+	app.Handle(http.MethodPut, version, "/users/:user_id", ugh.Update, authen, ruleAdminOrSubject, tran)
+	app.Handle(http.MethodDelete, version, "/users/:user_id", ugh.Delete, authen, ruleAdminOrSubject, tran)
 
-	pgh := productgrp.Handlers{
-		Product: product.NewCore(productdb.NewStore(cfg.Log, cfg.DB)),
-		Auth:    cfg.Auth,
-	}
-	app.Handle(http.MethodGet, version, "/products/:page/:rows", pgh.Query, authen)
-	app.Handle(http.MethodGet, version, "/products/:id", pgh.QueryByID, authen)
+	// -------------------------------------------------------------------------
+
+	pgh := productgrp.New(prdCore, usrCore)
+
+	app.Handle(http.MethodGet, version, "/products", pgh.Query, authen)
+	app.Handle(http.MethodGet, version, "/products/:product_id", pgh.QueryByID, authen)
 	app.Handle(http.MethodPost, version, "/products", pgh.Create, authen)
-	app.Handle(http.MethodPut, version, "/products/:id", pgh.Update, authen)
-	app.Handle(http.MethodDelete, version, "/products/:id", pgh.Delete, authen)
+	app.Handle(http.MethodPut, version, "/products/:product_id", pgh.Update, authen, tran)
+	app.Handle(http.MethodDelete, version, "/products/:product_id", pgh.Delete, authen, tran)
 
+	// -------------------------------------------------------------------------
+
+	tgh := trangrp.New(usrCore, prdCore)
+
+	app.Handle(http.MethodPost, version, "/tranexample", tgh.Create, authen, tran)
 }

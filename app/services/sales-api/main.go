@@ -13,58 +13,64 @@ import (
 	"time"
 
 	"github.com/wtran29/go-service/app/services/sales-api/handlers"
-	"github.com/wtran29/go-service/business/sys/database"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
 	"github.com/wtran29/go-service/business/web/auth"
 	"github.com/wtran29/go-service/business/web/v1/debug"
 	"github.com/wtran29/go-service/foundation/logger"
 	"github.com/wtran29/go-service/foundation/vault"
+	"github.com/wtran29/go-service/foundation/web"
 
 	"github.com/ardanlabs/conf/v3"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/zipkin"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-
-	"go.uber.org/automaxprocs/maxprocs"
-	"go.uber.org/zap"
 )
 
 /*
 	Need to figure out timeouts for http service.
+	Add Category field and type to product.
+	Idea for generating Web API docs
+		service:api POST /products AppNewProduct AppNewProduct http.StatusCreated
 */
 
 var build = "develop"
 
 func main() {
-	// Construct the application logger.
-	log, err := logger.New("SALES-API")
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	defer log.Sync()
-	// Perform the startup and shutdown sequence
-	if err := run(log); err != nil {
-		log.Errorw("startup", "ERROR", err)
-		log.Sync()
-		os.Exit(1)
+	var log *logger.Logger
+
+	events := logger.Events{
+		Error: func(ctx context.Context, r logger.Record) {
+			log.Info(ctx, "******* SEND ALERT ******")
+		},
 	}
 
+	traceIDFunc := func(ctx context.Context) string {
+		return web.GetTraceID(ctx)
+	}
+
+	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "SALES-API", traceIDFunc, events)
+
+	// -------------------------------------------------------------------------
+
+	ctx := context.Background()
+
+	if err := run(ctx, log); err != nil {
+		log.Error(ctx, "startup", "msg", err)
+		os.Exit(1)
+	}
 }
 
-func run(log *zap.SugaredLogger) error {
-	// =========================================================================
+func run(ctx context.Context, log *logger.Logger) error {
+
+	// -------------------------------------------------------------------------
 	// GOMAXPROCS
 
-	opt := maxprocs.Logger(log.Infof)
-	if _, err := maxprocs.Set(opt); err != nil {
-		return fmt.Errorf("maxprocs: %w", err)
-	}
-	log.Infow("startup", "GOMAXPROCS", runtime.GOMAXPROCS(0), "BUILD-", build)
+	log.Info(ctx, "startup", "GOMAXPROCS", runtime.GOMAXPROCS(0))
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Configuration
 
 	cfg := struct {
@@ -77,10 +83,11 @@ func run(log *zap.SugaredLogger) error {
 			APIHost         string        `conf:"default:0.0.0.0:3000"`
 			DebugHost       string        `conf:"default:0.0.0.0:4000"`
 		}
-		// Auth struct {
-		// 	KeysFolder string `conf:"default:containers/.env/"`
-		// 	ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
-		// }
+		Auth struct {
+			// KeysFolder string `conf:"default:zarf/keys/"`
+			// ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
+			Issuer string `conf:"default:service project"`
+		}
 		Vault struct {
 			Address   string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
 			MountPath string `conf:"default:secret"`
@@ -95,15 +102,15 @@ func run(log *zap.SugaredLogger) error {
 			MaxOpenConns int    `conf:"default:0"`
 			DisableTLS   bool   `conf:"default:true"`
 		}
-		Zipkin struct {
-			ReporterURI string  `conf:"default:http://zipkin-service.sales-system.svc.cluster.local:9411/api/v2/spans"`
+		Tempo struct {
+			ReporterURI string  `conf:"default:tempo.sales-system.svc.cluster.local:4317"`
 			ServiceName string  `conf:"default:sales-api"`
-			Probability float64 `conf:"default:0.05"`
+			Probability float64 `conf:"default:1"` // Shouldn't use a high value in non-developer systems. 0.05 should be enough for most systems. Some might want to have this even lower
 		}
 	}{
 		Version: conf.Version{
 			Build: build,
-			Desc:  "copyright information here",
+			Desc:  "BILL KENNEDY",
 		},
 	}
 
@@ -117,24 +124,24 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("parsing config: %w", err)
 	}
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// App Starting
 
-	log.Infow("starting service", "version", build)
-	defer log.Infow("shutdown complete")
+	log.Info(ctx, "starting service", "version", build)
+	defer log.Info(ctx, "shutdown complete")
 
 	out, err := conf.String(&cfg)
 	if err != nil {
 		return fmt.Errorf("generating config for output: %w", err)
 	}
-	log.Infow("startup", "config", out)
+	log.Info(ctx, "startup", "config", out)
 
 	expvar.NewString("build").Set(build)
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Database Support
 
-	log.Infow("startup", "status", "initializing database support", "host", cfg.DB.Host)
+	log.Info(ctx, "startup", "status", "initializing database support", "host", cfg.DB.Host)
 
 	db, err := database.Open(database.Config{
 		User:         cfg.DB.User,
@@ -149,14 +156,20 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("connecting to db: %w", err)
 	}
 	defer func() {
-		log.Infow("shutdown", "status", "stopping database support", "host", cfg.DB.Host)
+		log.Info(ctx, "shutdown", "status", "stopping database support", "host", cfg.DB.Host)
 		db.Close()
 	}()
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Initialize authentication support
 
-	log.Infow("startup", "status", "initializing authentication support")
+	log.Info(ctx, "startup", "status", "initializing authentication support")
+
+	// Simple keystore versus using Vault.
+	// ks, err := keystore.NewFS(os.DirFS(cfg.Auth.KeysFolder))
+	// if err != nil {
+	// 	return fmt.Errorf("reading keys: %w", err)
+	// }
 
 	vault, err := vault.New(vault.Config{
 		Address:   cfg.Vault.Address,
@@ -178,15 +191,15 @@ func run(log *zap.SugaredLogger) error {
 		return fmt.Errorf("constructing auth: %w", err)
 	}
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Start Tracing Support
 
-	log.Infow("startup", "status", "initializing OT/Zipkin tracing support")
+	log.Info(ctx, "startup", "status", "initializing OT/Tempo tracing support")
 
 	traceProvider, err := startTracing(
-		cfg.Zipkin.ServiceName,
-		cfg.Zipkin.ReporterURI,
-		cfg.Zipkin.Probability,
+		cfg.Tempo.ServiceName,
+		cfg.Tempo.ReporterURI,
+		cfg.Tempo.Probability,
 	)
 	if err != nil {
 		return fmt.Errorf("starting tracing: %w", err)
@@ -195,80 +208,66 @@ func run(log *zap.SugaredLogger) error {
 
 	tracer := traceProvider.Tracer("service")
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Start Debug Service
 
-	log.Infow("startup", "status", "debug v1 router started", "host", cfg.Web.DebugHost)
-
-	// The Debug function returns a mux to listen and serve on for all the debug
-	// related endpoints. This include the standard library endpoints.
-
-	// Construct the mux for the debug calls.
-	// debugMux := handlers.DebugMux(build, log, db)
-
-	// Start the service listening for debug requests.
-	// Not concerned with shutting this down with load shedding.
 	go func() {
-		if err := http.ListenAndServe(cfg.Web.DebugHost, debug.Mux(build, log, db)); err != nil {
-			log.Errorw("shutdown", "status", "debug v1 router closed", "host", cfg.Web.DebugHost, "ERROR", err)
+		log.Info(ctx, "startup", "status", "debug v1 router started", "host", cfg.Web.DebugHost)
+
+		if err := http.ListenAndServe(cfg.Web.DebugHost, debug.Mux()); err != nil {
+			log.Error(ctx, "shutdown", "status", "debug v1 router closed", "host", cfg.Web.DebugHost, "msg", err)
 		}
 	}()
 
-	// =========================================================================
+	// -------------------------------------------------------------------------
 	// Start API Service
 
-	log.Infow("startup", "status", "initializing V1 API support")
+	log.Info(ctx, "startup", "status", "initializing V1 API support")
 
-	// Make a channel to listen for an interrupt or terminate signal from the OS.
-	// Use a buffered channel because the signal package requires it.
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
-	// Construct the mux for the API calls.
-	apiMux := handlers.APIMux(handlers.APIMuxConfig{
+	cfgMux := handlers.APIMuxConfig{
+		Build:    build,
 		Shutdown: shutdown,
 		Log:      log,
 		Auth:     auth,
 		DB:       db,
 		Tracer:   tracer,
-	})
+	}
+	apiMux := handlers.APIMux(cfgMux, handlers.WithCORS("*"))
 
-	// Construct a server to service the requests against the mux.
 	api := http.Server{
 		Addr:         cfg.Web.APIHost,
 		Handler:      apiMux,
 		ReadTimeout:  cfg.Web.ReadTimeout,
 		WriteTimeout: cfg.Web.WriteTimeout,
 		IdleTimeout:  cfg.Web.IdleTimeout,
-		ErrorLog:     zap.NewStdLog(log.Desugar()),
+		ErrorLog:     logger.NewStdLogger(log, logger.LevelError),
 	}
 
-	// Make a channel to listen for errors coming from the listener. Use a
-	// buffered channel so the goroutine can exit if we don't collect this error.
 	serverErrors := make(chan error, 1)
 
-	// Start the service listening for api requests.
 	go func() {
-		log.Infow("startup", "status", "api router started", "host", api.Addr)
+		log.Info(ctx, "startup", "status", "api router started", "host", api.Addr)
+
 		serverErrors <- api.ListenAndServe()
 	}()
-	// =========================================================================
+
+	// -------------------------------------------------------------------------
 	// Shutdown
 
-	// Blocking main and waiting for shutdown.
 	select {
 	case err := <-serverErrors:
 		return fmt.Errorf("server error: %w", err)
 
 	case sig := <-shutdown:
-		log.Infow("shutdown", "status", "shutdown started", "signal", sig)
-		defer log.Infow("shutdown", "status", "shutdown complete", "signal", sig)
+		log.Info(ctx, "shutdown", "status", "shutdown started", "signal", sig)
+		defer log.Info(ctx, "shutdown", "status", "shutdown complete", "signal", sig)
 
-		// Give outstanding requests a deadline for completion.
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.Web.ShutdownTimeout)
 		defer cancel()
 
-		// Asking listener to shutdown and shed load.
 		if err := api.Shutdown(ctx); err != nil {
 			api.Close()
 			return fmt.Errorf("could not stop server gracefully: %w", err)
@@ -280,16 +279,19 @@ func run(log *zap.SugaredLogger) error {
 
 // =============================================================================
 
-// startTracing configure open telemetery to be used with zipkin.
+// startTracing configure open telemetry to be used with Grafana Tempo.
 func startTracing(serviceName string, reporterURI string, probability float64) (*trace.TracerProvider, error) {
 
 	// WARNING: The current settings are using defaults which may not be
 	// compatible with your project. Please review the documentation for
 	// opentelemetry.
 
-	exporter, err := zipkin.New(
-		reporterURI,
-		// zipkin.WithLogger(zap.NewStdLog(log)),
+	exporter, err := otlptrace.New(
+		context.Background(),
+		otlptracegrpc.NewClient(
+			otlptracegrpc.WithInsecure(), // This should be configurable
+			otlptracegrpc.WithEndpoint(reporterURI),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating new exporter: %w", err)
@@ -306,7 +308,6 @@ func startTracing(serviceName string, reporterURI string, probability float64) (
 			resource.NewWithAttributes(
 				semconv.SchemaURL,
 				semconv.ServiceNameKey.String(serviceName),
-				attribute.String("exporter", "zipkin"),
 			),
 		),
 	)
@@ -314,30 +315,7 @@ func startTracing(serviceName string, reporterURI string, probability float64) (
 	// We must set this provider as the global provider for things to work,
 	// but we pass this provider around the program where needed to collect
 	// our traces.
-	// I can only get this working properly using the singleton :(
 	otel.SetTracerProvider(traceProvider)
+
 	return traceProvider, nil
 }
-
-// Moved to foundations/logger as func New()
-// func initLogger(service string, outputPaths ...string) (*zap.SugaredLogger, error) {
-// 	config := zap.NewProductionConfig()
-
-// 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-// 	config.DisableStacktrace = true
-// 	config.InitialFields = map[string]any{
-// 		"service": service,
-// 	}
-
-// 	config.OutputPaths = []string{"stdout"}
-// 	if outputPaths != nil {
-// 		config.OutputPaths = outputPaths
-// 	}
-
-// 	log, err := config.Build(zap.WithCaller(true))
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	return log.Sugar(), nil
-// }
