@@ -3,15 +3,17 @@ package web
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"syscall"
 	"time"
 
-	// "github.com/dimfeld/httptreemux/v5"
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -31,7 +33,7 @@ type App struct {
 }
 
 // NewApp creates an App value that handle a set of routes for the application.
-func NewApp(shutdown chan os.Signal, mw ...Middleware) *App {
+func NewApp(shutdown chan os.Signal, tracer trace.Tracer, mw ...Middleware) *App {
 
 	// Create an OpenTelemetry HTTP Handler which wraps our router. This will start
 	// the initial span and annotate it with information about the request/response.
@@ -47,11 +49,11 @@ func NewApp(shutdown chan os.Signal, mw ...Middleware) *App {
 		otmux:    otelhttp.NewHandler(mux, "request"),
 		shutdown: shutdown,
 		mw:       mw,
-		// tracer:   tracer,
+		tracer:   tracer,
 	}
 }
 
-// SignalShutdown is used to gracefully shutdown the app when an integrity
+// SignalShutdown is used to gracefully shut down the app when an integrity
 // issue is identified.
 func (a *App) SignalShutdown() {
 	a.shutdown <- syscall.SIGTERM
@@ -65,49 +67,40 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.otmux.ServeHTTP(w, r)
 }
 
-// Handle sets a handler function for a given HTTP method and path pair
-// to the application server mux.
-// func (a *App) Handle(method string, group string, path string, handler Handler, mw ...Middleware) {
-// 	// handler = wrapMiddleware(mw, handler)
-// 	// handler = wrapMiddleware(a.mw, handler)
-
-// 	a.handle(method, group, path, handler)
-// }
+// HandleNoMiddleware sets a handler function for a given HTTP method and path pair
+// to the application server mux. Does not include the application middleware.
+func (a *App) HandleNoMiddleware(method string, group string, path string, handler Handler) {
+	a.handle(method, group, path, handler)
+}
 
 // Handle sets a handler function for a given HTTP method and path pair
 // to the application server mux.
 func (a *App) Handle(method string, group string, path string, handler Handler, mw ...Middleware) {
-
-	// First wrap handler specific middleware around this handler.
 	handler = wrapMiddleware(mw, handler)
-
-	// Add the application's general middleware to the handler chain.
 	handler = wrapMiddleware(a.mw, handler)
 
-	// Define the handle function to execute for each request.
+	a.handle(method, group, path, handler)
+}
+
+// Handle sets a handler function for a given HTTP method and path pair
+// to the application server mux.
+func (a *App) handle(method string, group string, path string, handler Handler) {
 	h := func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := a.startSpan(w, r)
+		defer span.End()
 
-		// Pull the context from the request and
-		// use it as a separate parameter.
-		ctx := r.Context()
-
-		span := trace.SpanFromContext(ctx)
-		// Set the context with the required values to
-		// process the request.
 		v := Values{
 			TraceID: span.SpanContext().TraceID().String(),
 			Tracer:  a.tracer,
 			Now:     time.Now().UTC(),
 		}
-		ctx = context.WithValue(ctx, key, &v)
+		ctx = SetValues(ctx, &v)
 
-		// Call the wrapped handler functions.
 		if err := handler(ctx, w, r); err != nil {
 			if validateShutdown(err) {
 				a.SignalShutdown()
 				return
 			}
-
 		}
 	}
 
@@ -117,6 +110,40 @@ func (a *App) Handle(method string, group string, path string, handler Handler, 
 	}
 
 	a.mux.MethodFunc(method, finalPath, h)
+}
+
+// startSpan initializes the request by adding a span and writing otel
+// related information into the response writer for the response.
+func (a *App) startSpan(w http.ResponseWriter, r *http.Request) (context.Context, trace.Span) {
+	ctx := r.Context()
+
+	// There are times when the handler is called without a tracer, such
+	// as with tests. We need a span for the trace id.
+	span := trace.SpanFromContext(ctx)
+
+	// If a tracer exists, then replace the span for the one currently
+	// found in the context. This may have come from over the wire.
+	if a.tracer != nil {
+		ctx, span = a.tracer.Start(ctx, "pkg.web.handle")
+		span.SetAttributes(attribute.String("endpoint", r.RequestURI))
+	}
+
+	// Add trace context in traceparent form (https://www.w3.org/TR/trace-context/#traceparent-header)
+	// as Server-Timing header (https://www.w3.org/TR/server-timing/) to the HTTP response.
+	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.IsValid() {
+		traceID := spanCtx.TraceID()
+		hexTraceID := hex.EncodeToString(traceID[:])
+
+		spanID := spanCtx.SpanID()
+		hexSpanID := hex.EncodeToString(spanID[:])
+
+		traceParent := fmt.Sprintf(`traceparent;desc="00-%s-%s-01"`, hexTraceID, hexSpanID)
+
+		w.Header().Add("Access-Control-Expose-Headers", "Server-Timing")
+		w.Header().Add("Server-Timing", traceParent)
+	}
+
+	return ctx, span
 }
 
 // validateShutdown validates the error for special conditions that do not
