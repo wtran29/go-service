@@ -2,25 +2,31 @@
 package dbtest
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"net/mail"
-	"service/business/core/user/stores/userdb"
-	"service/business/data/schema"
-	"service/business/sys/database"
-	"service/business/web/auth"
-	"service/foundation/docker"
 	"testing"
 	"time"
 
+	"github.com/wtran29/go-service/business/core/event"
+	"github.com/wtran29/go-service/business/core/product"
+	"github.com/wtran29/go-service/business/core/product/stores/productdb"
+	"github.com/wtran29/go-service/business/core/user"
+	"github.com/wtran29/go-service/business/core/user/stores/userdb"
+	"github.com/wtran29/go-service/business/core/usersummary"
+	"github.com/wtran29/go-service/business/core/usersummary/stores/usersummarydb"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
+	"github.com/wtran29/go-service/business/data/dbmigrate"
+	"github.com/wtran29/go-service/business/web/auth"
+	"github.com/wtran29/go-service/foundation/docker"
+	"github.com/wtran29/go-service/foundation/logger"
+	"github.com/wtran29/go-service/foundation/web"
+
 	"github.com/golang-jwt/jwt/v4"
 
-	"go.uber.org/zap/zapcore"
-
 	"github.com/jmoiron/sqlx"
-	"go.uber.org/zap"
 )
 
 // Success and failure markers.
@@ -31,11 +37,12 @@ const (
 
 // StartDB starts a database instance.
 func StartDB() (*docker.Container, error) {
-	image := "postgres:15-alpine"
+	image := "postgres:15.3"
 	port := "5432"
-	args := []string{"-e", "POSTGRES_PASSWORD=postgres"}
+	dockerArgs := []string{"-e", "POSTGRES_PASSWORD=postgres"}
+	appArgs := []string{"-c", "log_statement=all"}
 
-	c, err := docker.StartContainer(image, port, args...)
+	c, err := docker.StartContainer(image, port, dockerArgs, appArgs)
 	if err != nil {
 		return nil, fmt.Errorf("starting container: %w", err)
 	}
@@ -53,10 +60,22 @@ func StopDB(c *docker.Container) {
 	fmt.Println("Stopped:", c.ID)
 }
 
-// NewUnit creates a test database inside a Docker container. It creates the
+// =============================================================================
+
+// Test owns state for running and shutting down tests.
+type Test struct {
+	DB       *sqlx.DB
+	Log      *logger.Logger
+	Auth     *auth.Auth
+	CoreAPIs CoreAPIs
+	Teardown func()
+	t        *testing.T
+}
+
+// NewTest creates a test database inside a Docker container. It creates the
 // required table structure but the database is otherwise empty. It returns
 // the database to use as well as a function to call at the end of the test.
-func NewUnit(t *testing.T, c *docker.Container, dbName string) (*zap.SugaredLogger, *sqlx.DB, func()) {
+func NewTest(t *testing.T, c *docker.Container) *Test {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -77,14 +96,21 @@ func NewUnit(t *testing.T, c *docker.Container, dbName string) (*zap.SugaredLogg
 		t.Fatalf("status check database: %v", err)
 	}
 
-	t.Log("Database ready")
+	const letterBytes = "abcdefghijklmnopqrstuvwxyz"
+	b := make([]byte, 4)
+	for i := range b {
+		b[i] = letterBytes[rand.Intn(len(letterBytes))]
+	}
+	dbName := string(b)
 
 	if _, err := dbM.ExecContext(context.Background(), "CREATE DATABASE "+dbName); err != nil {
 		t.Fatalf("creating database %s: %v", dbName, err)
 	}
 	dbM.Close()
 
-	// =========================================================================
+	t.Log("Database ready")
+
+	// -------------------------------------------------------------------------
 
 	db, err := database.Open(database.Config{
 		User:       "postgres",
@@ -99,69 +125,26 @@ func NewUnit(t *testing.T, c *docker.Container, dbName string) (*zap.SugaredLogg
 
 	t.Log("Migrate and seed database ...")
 
-	if err := schema.Migrate(ctx, db); err != nil {
+	if err := dbmigrate.Migrate(ctx, db); err != nil {
 		t.Logf("Logs for %s\n%s:", c.ID, docker.DumpContainerLogs(c.ID))
 		t.Fatalf("Migrating error: %s", err)
 	}
 
-	if err := schema.Seed(ctx, db); err != nil {
+	if err := dbmigrate.Seed(ctx, db); err != nil {
 		t.Logf("Logs for %s\n%s:", c.ID, docker.DumpContainerLogs(c.ID))
 		t.Fatalf("Seeding error: %s", err)
 	}
 
-	t.Log("Ready for testing ...")
+	// -------------------------------------------------------------------------
 
 	var buf bytes.Buffer
-	encoder := zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig())
-	writer := bufio.NewWriter(&buf)
-	log := zap.New(
-		zapcore.NewCore(encoder, zapcore.AddSync(writer), zapcore.DebugLevel),
-		zap.WithCaller(true),
-	).Sugar()
+	log := logger.New(&buf, logger.LevelInfo, "TEST", func(context.Context) string { return web.GetTraceID(ctx) })
 
-	// teardown is the function that should be invoked when the caller is done
-	// with the database.
-	teardown := func() {
-		t.Helper()
-		db.Close()
+	coreAPIs := newCoreAPIs(log, db)
 
-		log.Sync()
+	t.Log("Ready for testing ...")
 
-		writer.Flush()
-		fmt.Println("******************** LOGS ********************")
-		fmt.Print(buf.String())
-		fmt.Println("******************** LOGS ********************")
-	}
-
-	return log, db, teardown
-}
-
-// Test owns state for running and shutting down tests.
-type Test struct {
-	DB       *sqlx.DB
-	Log      *zap.SugaredLogger
-	Auth     *auth.Auth
-	Teardown func()
-
-	t *testing.T
-}
-
-// NewIntegration creates a database, seeds it, constructs an authenticator.
-func NewIntegration(t *testing.T, c *docker.Container, dbName string) *Test {
-	log, db, teardown := NewUnit(t, c, dbName)
-
-	// // Create RSA keys to enable authentication in our service.
-	// keyID := "4754d86b-7a6d-4df5-9c65-224741361492"
-	// privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	// if err != nil {
-	// 	t.Fatal(err)
-	// }
-
-	// // Build an authenticator using this private key and id for the key store.
-	// auth, err := auth.New(keyID, keystore.NewMap(map[string]*rsa.PrivateKey{keyID: privateKey}))
-	// if err != nil {
-	// 	t.Fatal(err)
-	// }
+	// -------------------------------------------------------------------------
 
 	cfg := auth.Config{
 		Log:       log,
@@ -173,12 +156,26 @@ func NewIntegration(t *testing.T, c *docker.Container, dbName string) *Test {
 		t.Fatal(err)
 	}
 
+	// -------------------------------------------------------------------------
+
+	// teardown is the function that should be invoked when the caller is done
+	// with the database.
+	teardown := func() {
+		t.Helper()
+		db.Close()
+
+		fmt.Println("******************** LOGS ********************")
+		fmt.Print(buf.String())
+		fmt.Println("******************** LOGS ********************")
+	}
+
 	test := Test{
 		DB:       db,
 		Log:      log,
 		Auth:     a,
-		t:        t,
+		CoreAPIs: coreAPIs,
 		Teardown: teardown,
+		t:        t,
 	}
 
 	return &test
@@ -214,6 +211,8 @@ func (test *Test) Token(email string, pass string) string {
 	return token
 }
 
+// =============================================================================
+
 // StringPointer is a helper to get a *string from a string. It is in the tests
 // package because we normally don't want to deal with pointers to basic types
 // but it's useful in some tests.
@@ -228,15 +227,44 @@ func IntPointer(i int) *int {
 	return &i
 }
 
+// FloatPointer is a helper to get a *float64 from a float64. It is in the tests
+// package because we normally don't want to deal with pointers to basic types
+// but it's useful in some tests.
+func FloatPointer(f float64) *float64 {
+	return &f
+}
+
+// =============================================================================
+
+// CoreAPIs represents all the core api's needed for testing.
+type CoreAPIs struct {
+	User        *user.Core
+	Product     *product.Core
+	UserSummary *usersummary.Core
+}
+
+func newCoreAPIs(log *logger.Logger, db *sqlx.DB) CoreAPIs {
+	evnCore := event.NewCore(log)
+	usrCore := user.NewCore(log, evnCore, userdb.NewStore(log, db))
+	prdCore := product.NewCore(log, evnCore, usrCore, productdb.NewStore(log, db))
+	usmCore := usersummary.NewCore(usersummarydb.NewStore(log, db))
+
+	return CoreAPIs{
+		User:        usrCore,
+		Product:     prdCore,
+		UserSummary: usmCore,
+	}
+}
+
 // =============================================================================
 
 type keyStore struct{}
 
-func (ks *keyStore) PrivateKeyPEM(kid string) (string, error) {
+func (ks *keyStore) PrivateKey(kid string) (string, error) {
 	return privateKeyPEM, nil
 }
 
-func (ks *keyStore) PublicKeyPEM(kid string) (string, error) {
+func (ks *keyStore) PublicKey(kid string) (string, error) {
 	return publicKeyPEM, nil
 }
 
