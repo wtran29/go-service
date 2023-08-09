@@ -9,12 +9,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
+	"github.com/wtran29/go-service/business/core/event"
 	"github.com/wtran29/go-service/business/core/user"
+	"github.com/wtran29/go-service/business/core/user/stores/userdb"
+	"github.com/wtran29/go-service/foundation/logger"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/open-policy-agent/opa/rego"
-	"go.uber.org/zap"
 
 	"github.com/golang-jwt/jwt/v4"
 )
@@ -38,8 +41,7 @@ type KeyLookup interface {
 
 // Config represents information required to initialize auth.
 type Config struct {
-	// Log       *logger.Logger
-	Log       *zap.SugaredLogger
+	Log       *logger.Logger
 	DB        *sqlx.DB
 	KeyLookup KeyLookup
 	Issuer    string
@@ -48,35 +50,35 @@ type Config struct {
 // Auth is used to authenticate clients. It can generate a token for a
 // set of user claims and recreate the claims by parsing the token.
 type Auth struct {
-	// log       *logger.Logger
-	log       *zap.SugaredLogger
+	log       *logger.Logger
 	keyLookup KeyLookup
-	// userCore  *user.Core
-	method jwt.SigningMethod
-	parser *jwt.Parser
-	issuer string
-	mu     sync.RWMutex
-	cache  map[string]string
+	userCore  *user.Core
+	method    jwt.SigningMethod
+	parser    *jwt.Parser
+	issuer    string
+	mu        sync.RWMutex
+	cache     map[string]string
 }
 
 // New creates an Auth to support authentication/authorization.
 func New(cfg Config) (*Auth, error) {
+
 	// If a database connection is not provided, we won't perform the
 	// user enabled check.
-	// var usrCore *user.Core
-	// if cfg.DB != nil {
-	// 	evnCore := event.NewCore(cfg.Log)
-	// 	usrCore = user.NewCore(cfg.Log, evnCore, userdb.NewStore(cfg.Log, cfg.DB))
-	// }
+	var usrCore *user.Core
+	if cfg.DB != nil {
+		evnCore := event.NewCore(cfg.Log)
+		usrCore = user.NewCore(cfg.Log, evnCore, userdb.NewStore(cfg.Log, cfg.DB))
+	}
 
 	a := Auth{
-		// log: cfg.Log,
 		log:       cfg.Log,
 		keyLookup: cfg.KeyLookup,
-		// user:      usr,
-		method: jwt.GetSigningMethod("RS256"),
-		parser: jwt.NewParser(jwt.WithValidMethods([]string{"RS256"})),
-		cache:  make(map[string]string),
+		userCore:  usrCore,
+		method:    jwt.GetSigningMethod(jwt.SigningMethodRS256.Name),
+		parser:    jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Name})),
+		issuer:    cfg.Issuer,
+		cache:     make(map[string]string),
 	}
 
 	return &a, nil
@@ -105,22 +107,6 @@ func (a *Auth) GenerateToken(kid string, claims Claims) (string, error) {
 	return str, nil
 }
 
-// // ValidateToken recreates the Claims that were used to generate a token. It
-// // verifies that the token was signed using our key.
-// func (a *Auth) ValidateToken(tokenStr string) (Claims, error) {
-// 	var claims Claims
-// 	token, err := a.parser.ParseWithClaims(tokenStr, &claims, a.keyFunc)
-// 	if err != nil {
-// 		return Claims{}, fmt.Errorf("parsing token: %w", err)
-// 	}
-
-// 	if !token.Valid {
-// 		return Claims{}, errors.New("invalid token")
-// 	}
-
-// 	return claims, nil
-// }
-
 // Authenticate processes the token to validate the sender's token is valid.
 func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, error) {
 	parts := strings.Split(bearerToken, " ")
@@ -146,9 +132,9 @@ func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, er
 		return Claims{}, fmt.Errorf("kid malformed: %w", err)
 	}
 
-	pem, err := a.keyLookup.PublicKey(kid)
+	pem, err := a.publicKeyLookup(kid)
 	if err != nil {
-		return Claims{}, fmt.Errorf("fetch public key: %w", err)
+		return Claims{}, fmt.Errorf("failed to fetch public key: %w", err)
 	}
 
 	input := map[string]any{
@@ -163,9 +149,9 @@ func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, er
 
 	// Check the database for this user to verify they are still enabled.
 
-	// if !a.isUserEnabled(ctx, claims) {
-	// 	return Claims{}, fmt.Errorf("user not enabled : %w", err)
-	// }
+	if err := a.isUserEnabled(ctx, claims); err != nil {
+		return Claims{}, fmt.Errorf("user not enabled : %w", err)
+	}
 
 	return claims, nil
 }
@@ -173,11 +159,11 @@ func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, er
 // Authorize attempts to authorize the user with the provided input roles, if
 // none of the input roles are within the user's claims, we return an error
 // otherwise the user is authorized.
-func (a *Auth) Authorize(ctx context.Context, claims Claims, rule string) error {
+func (a *Auth) Authorize(ctx context.Context, claims Claims, userID uuid.UUID, rule string) error {
 	input := map[string]any{
 		"Roles":   claims.Roles,
 		"Subject": claims.Subject,
-		"UserID":  claims.Subject,
+		"UserID":  userID,
 	}
 
 	if err := a.opaPolicyEvaluation(ctx, opaAuthorization, rule, input); err != nil {
@@ -249,20 +235,19 @@ func (a *Auth) opaPolicyEvaluation(ctx context.Context, opaPolicy string, rule s
 
 // isUserEnabled hits the database and checks the user is not disabled. If the
 // no database connection was provided, this check is skipped.
-// func (a *Auth) isUserEnabled(ctx context.Context, claims Claims) bool {
-// 	if a.user == nil {
-// 		return true
-// 	}
+func (a *Auth) isUserEnabled(ctx context.Context, claims Claims) error {
+	if a.userCore == nil {
+		return nil
+	}
 
-// 	userID, err := uuid.Parse(claims.Subject)
-// 	if err != nil {
-// 		return false
-// 	}
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return fmt.Errorf("parse user: %w", err)
+	}
 
-// 	usr, err := a.user.QueryByID(ctx, userID)
-// 	if err != nil {
-// 		return false
-// 	}
+	if _, err := a.userCore.QueryByID(ctx, userID); err != nil {
+		return fmt.Errorf("query user: %w", err)
+	}
 
-// 	return usr.Enabled
-// }
+	return nil
+}

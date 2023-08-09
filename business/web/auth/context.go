@@ -1,6 +1,10 @@
 package auth
 
-import "context"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
 
 // ctxKey represents the type of value for the context key.
 type ctxKey int
@@ -9,7 +13,7 @@ type ctxKey int
 const claimKey ctxKey = 1
 
 // key is used to store/retrieve a user value from a context.Context.
-// const userKey ctxKey = 2
+const userKey ctxKey = 2
 
 // =============================================================================
 
@@ -27,16 +31,16 @@ func GetClaims(ctx context.Context) Claims {
 	return v
 }
 
-// // SetUserID stores the user id from the request in the context.
-// func SetUserID(ctx context.Context, userID uuid.UUID) context.Context {
-// 	return context.WithValue(ctx, userKey, userID)
-// }
+// SetUserID stores the user id from the request in the context.
+func SetUserID(ctx context.Context, userID uuid.UUID) context.Context {
+	return context.WithValue(ctx, userKey, userID)
+}
 
-// // GetUserID returns the claims from the context.
-// func GetUserID(ctx context.Context) uuid.UUID {
-// 	v, ok := ctx.Value(userKey).(uuid.UUID)
-// 	if !ok {
-// 		return uuid.UUID{}
-// 	}
-// 	return v
-// }
+// GetUserID returns the claims from the context.
+func GetUserID(ctx context.Context) uuid.UUID {
+	v, ok := ctx.Value(userKey).(uuid.UUID)
+	if !ok {
+		return uuid.UUID{}
+	}
+	return v
+}
