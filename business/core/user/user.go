@@ -53,16 +53,6 @@ type Core struct {
 	log     *logger.Logger
 }
 
-type TestCore struct {
-	storer Storer
-}
-
-func TestNewCore(storer Storer) *TestCore {
-	return &TestCore{
-		storer: storer,
-	}
-}
-
 // NewCore constructs a core for user api access.
 func NewCore(log *logger.Logger, evnCore *event.Core, storer Storer) *Core {
 	return &Core{
