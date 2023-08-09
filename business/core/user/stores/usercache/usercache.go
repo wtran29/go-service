@@ -6,33 +6,35 @@ import (
 	"net/mail"
 	"sync"
 
-	"service/business/core/user"
-	"service/business/data/order"
+	"github.com/wtran29/go-service/business/core/user"
+	"github.com/wtran29/go-service/business/data/order"
+	"github.com/wtran29/go-service/business/data/transaction"
+	"github.com/wtran29/go-service/foundation/logger"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 // Store manages the set of APIs for user data and caching.
 type Store struct {
-	log    *zap.SugaredLogger
+	log    *logger.Logger
 	storer user.Storer
-	cache  map[string]*user.User
+	cache  map[string]user.User
 	mu     sync.RWMutex
 }
 
 // NewStore constructs the api for data and caching access.
-func NewStore(log *zap.SugaredLogger, storer user.Storer) *Store {
+func NewStore(log *logger.Logger, storer user.Storer) *Store {
 	return &Store{
 		log:    log,
 		storer: storer,
-		cache:  map[string]*user.User{},
+		cache:  map[string]user.User{},
 	}
 }
 
-// WithinTran runs passed function and do commit/rollback at the end.
-func (s *Store) WithinTran(ctx context.Context, fn func(s user.Storer) error) error {
-	return s.storer.WithinTran(ctx, fn)
+// ExecuteUnderTransaction constructs a new Store value replacing the sqlx DB
+// value with a sqlx DB value that is currently inside a transaction.
+func (s *Store) ExecuteUnderTransaction(tx transaction.Transaction) (user.Storer, error) {
+	return s.storer.ExecuteUnderTransaction(tx)
 }
 
 // Create inserts a new user into the database.
@@ -73,6 +75,11 @@ func (s *Store) Query(ctx context.Context, filter user.QueryFilter, orderBy orde
 	return s.storer.Query(ctx, filter, orderBy, pageNumber, rowsPerPage)
 }
 
+// Count returns the total number of cards in the DB.
+func (s *Store) Count(ctx context.Context, filter user.QueryFilter) (int, error) {
+	return s.storer.Count(ctx, filter)
+}
+
 // QueryByID gets the specified user from the database.
 func (s *Store) QueryByID(ctx context.Context, userID uuid.UUID) (user.User, error) {
 	cachedUsr, ok := s.readCache(userID.String())
@@ -86,6 +93,16 @@ func (s *Store) QueryByID(ctx context.Context, userID uuid.UUID) (user.User, err
 	}
 
 	s.writeCache(usr)
+
+	return usr, nil
+}
+
+// QueryByIDs gets the specified users from the database.
+func (s *Store) QueryByIDs(ctx context.Context, userIDs []uuid.UUID) ([]user.User, error) {
+	usr, err := s.storer.QueryByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	return usr, nil
 }
@@ -119,7 +136,7 @@ func (s *Store) readCache(key string) (user.User, bool) {
 		return user.User{}, false
 	}
 
-	return *usr, true
+	return usr, true
 }
 
 // writeCache performs a safe write to the cache for the specified user.
@@ -127,8 +144,8 @@ func (s *Store) writeCache(usr user.User) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.cache[usr.ID.String()] = &usr
-	s.cache[usr.Email.Address] = &usr
+	s.cache[usr.ID.String()] = usr
+	s.cache[usr.Email.Address] = usr
 }
 
 // deleteCache performs a safe removal from the cache for the specified user.

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wtran29/go-service/business/sys/validate"
+	"github.com/wtran29/go-service/foundation/validate"
 )
 
 // QueryFilter holds the available fields filters to search
