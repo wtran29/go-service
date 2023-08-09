@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"service/foundation/docker"
-	"service/foundation/vault"
+	"github.com/wtran29/go-service/foundation/docker"
+	"github.com/wtran29/go-service/foundation/vault"
 )
 
 // Success and failure markers.
@@ -25,12 +25,12 @@ func Test_Vault(t *testing.T) {
 	const token = "mytoken"
 	const mountPath = "secret"
 	const key = "54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"
-	const image = "hashicorp/vault:1.12"
+	const image = "hashicorp/vault:1.14"
 	const port = "8200"
 
-	args := []string{"-e", "VAULT_DEV_ROOT_TOKEN_ID=" + token, "-e", "VAULT_DEV_LISTEN_ADDRESS=" + address}
+	dockerArgs := []string{"-e", "VAULT_DEV_ROOT_TOKEN_ID=" + token, "-e", "VAULT_DEV_LISTEN_ADDRESS=" + address}
 
-	c, err := docker.StartContainer(image, port, args...)
+	c, err := docker.StartContainer(image, port, dockerArgs, nil)
 	if err != nil {
 		t.Fatalf("starting container: %s", err)
 	}
@@ -43,53 +43,43 @@ func Test_Vault(t *testing.T) {
 	// Give Vault time to initialize.
 	time.Sleep(time.Second)
 
-	t.Log("Given the need to talk to Vault for key support.")
-	{
-		testID := 0
-		t.Logf("\tTest %d:\tWhen handling a single key.", testID)
-		{
-			vault, err := vault.New(vault.Config{
-				Address:   "http://" + c.Host,
-				MountPath: mountPath,
-				Token:     token,
-			})
-			if err != nil {
-				t.Fatalf("\t%s\tTest %d:\tShould be able to construct our Vault API: %v", failed, testID, err)
-			}
-			t.Logf("\t%s\tTest %d:\tShould be able to construct our Vault API.", success, testID)
+	// -------------------------------------------------------------------------
 
-			pkExp, err := rsa.GenerateKey(rand.Reader, 2048)
-			if err != nil {
-				t.Fatalf("\t%s\tTest %d:\tShould be able to generate a private key: %v", failed, testID, err)
-			}
-			t.Logf("\t%s\tTest %d:\tShould be able to generate a private key.", success, testID)
+	vault, err := vault.New(vault.Config{
+		Address:   "http://" + c.Host,
+		MountPath: mountPath,
+		Token:     token,
+	})
+	if err != nil {
+		t.Fatalf("Should be able to construct our Vault API : %s", err)
+	}
 
-			pbExp := pem.Block{
-				Type:  "PRIVATE KEY",
-				Bytes: x509.MarshalPKCS1PrivateKey(pkExp),
-			}
-			var expPEM bytes.Buffer
-			if err := pem.Encode(&expPEM, &pbExp); err != nil {
-				t.Fatalf("\t%s\tTest %d:\tShould be able to encode pk to PEM: %v", failed, testID, err)
-			}
-			t.Logf("\t%s\tTest %d:\tShould be able to encode pk to PEM.", success, testID)
+	pkExp, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Should be able to generate a private key : %s", err)
+	}
 
-			if err := vault.AddPrivateKey(context.Background(), key, expPEM.Bytes()); err != nil {
-				t.Fatalf("\t%s\tTest %d:\tShould be able to put the PEM into Vault: %v", failed, testID, err)
-			}
-			t.Logf("\t%s\tTest %d:\tShould be able to put the PEM into Vault.", success, testID)
+	pbExp := pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(pkExp),
+	}
+	var expPEM bytes.Buffer
+	if err := pem.Encode(&expPEM, &pbExp); err != nil {
+		t.Fatalf("Should be able to encode pk to PEM : %s", err)
+	}
 
-			gotPEM, err := vault.PrivateKeyPEM(key)
-			if err != nil {
-				t.Fatalf("\t%s\tTest %d:\tShould be able to pull the private key from Vault: %v", failed, testID, err)
-			}
-			t.Logf("\t%s\tTest %d:\tShould be able to pull the private key from Vault.", success, testID)
+	if err := vault.AddPrivateKey(context.Background(), key, expPEM.Bytes()); err != nil {
+		t.Fatalf("Should be able to put the PEM into Vault : %s", err)
+	}
 
-			if expPEM.String() != gotPEM {
-				t.Logf("\t\tTest %d:\texp: %s", testID, expPEM.String())
-				t.Logf("\t\tTest %d:\tgot: %s", testID, gotPEM)
-				t.Fatalf("\t%s\tTest %d:\tShould be able to see the keys match: %v", failed, testID, err)
-			}
-		}
+	gotPEM, err := vault.PrivateKey(key)
+	if err != nil {
+		t.Fatalf("Should be able to pull the private key from Vault : %s", err)
+	}
+
+	if expPEM.String() != gotPEM {
+		t.Logf("got: %s", gotPEM)
+		t.Logf("exp: %s", expPEM.String())
+		t.Error("Should be able to see the keys match")
 	}
 }
