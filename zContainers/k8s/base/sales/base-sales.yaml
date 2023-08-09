@@ -24,7 +24,11 @@ spec:
     spec:
       terminationGracePeriodSeconds: 60
 
-      # initContainers:
+      initContainers:
+      - name: init-migrate
+        image: service-image
+        command: ['./admin']
+
       # - name: init-migrate
       #   image: service-image
       #   command: ['./sales-admin', 'migrate']
@@ -64,12 +68,12 @@ spec:
           failureThreshold: 2
 
         env:
-        # - name: SALES_DB_HOST
-        #   valueFrom:
-        #     configMapKeyRef:
-        #       name: app-config
-        #       key: db_host
-        #       optional: true
+        - name: SALES_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: db_host
+              optional: true
 
         - name: GOMAXPROCS
           valueFrom:
@@ -93,20 +97,20 @@ spec:
             fieldRef:
               fieldPath: spec.nodeName
 
-      # - name: metrics
-      #   image: metrics-image
+      - name: metrics
+        image: metrics-image
 
-      #   ports:
-      #   - name: metrics
-      #     containerPort: 3001
-      #   - name: prometheus
-      #     containerPort: 3002
+        ports:
+        - name: metrics
+          containerPort: 3001
+        - name: prometheus
+          containerPort: 3002
 
-        # env:
-        #   - name: GOMAXPROCS
-        #     valueFrom:
-        #       resourceFieldRef:
-        #         resource: limits.cpu
+        env:
+          - name: GOMAXPROCS
+            valueFrom:
+              resourceFieldRef:
+                resource: limits.cpu
 
 ---
 
