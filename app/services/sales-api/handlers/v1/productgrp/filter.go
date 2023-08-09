@@ -1,38 +1,49 @@
 package productgrp
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
-	"service/business/core/product"
+	"github.com/google/uuid"
+	"github.com/wtran29/go-service/business/core/product"
+	"github.com/wtran29/go-service/foundation/validate"
 )
 
-func getFilter(r *http.Request) (product.QueryFilter, error) {
+func parseFilter(r *http.Request) (product.QueryFilter, error) {
 	values := r.URL.Query()
 
 	var filter product.QueryFilter
-	filter.ByID(values.Get("id"))
-	filter.ByName(values.Get("name"))
 
-	cost := values.Get("cost")
-	if cost != "" {
-		cst, err := strconv.ParseInt(cost, 10, 64)
+	if productID := values.Get("product_id"); productID != "" {
+		id, err := uuid.Parse(productID)
 		if err != nil {
-			return product.QueryFilter{}, fmt.Errorf("invalid field filter cost format: %s", cost)
+			return product.QueryFilter{}, validate.NewFieldsError("product_id", err)
 		}
-
-		filter.ByCost(int(cst))
+		filter.WithProductID(id)
 	}
 
-	quantity := values.Get("quantity")
-	if quantity != "" {
+	if cost := values.Get("cost"); cost != "" {
+		cst, err := strconv.ParseFloat(cost, 64)
+		if err != nil {
+			return product.QueryFilter{}, validate.NewFieldsError("cost", err)
+		}
+		filter.WithCost(cst)
+	}
+
+	if quantity := values.Get("quantity"); quantity != "" {
 		qua, err := strconv.ParseInt(quantity, 10, 64)
 		if err != nil {
-			return product.QueryFilter{}, fmt.Errorf("invalid field filter quantity format: %s", quantity)
+			return product.QueryFilter{}, validate.NewFieldsError("quantity", err)
 		}
+		filter.WithQuantity(int(qua))
+	}
 
-		filter.ByCost(int(qua))
+	if name := values.Get("name"); name != "" {
+		filter.WithName(name)
+	}
+
+	if err := filter.Validate(); err != nil {
+		return product.QueryFilter{}, err
 	}
 
 	return filter, nil

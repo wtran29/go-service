@@ -6,165 +6,224 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 
-	"service/business/core/product"
-	"service/business/web/auth"
-	v1Web "service/business/web/v1"
-	"service/foundation/web"
+	"github.com/wtran29/go-service/business/core/product"
+	"github.com/wtran29/go-service/business/core/user"
+	"github.com/wtran29/go-service/business/data/transaction"
+	v1 "github.com/wtran29/go-service/business/web/v1"
+	"github.com/wtran29/go-service/business/web/v1/paging"
+	"github.com/wtran29/go-service/foundation/web"
 
 	"github.com/google/uuid"
 )
 
-var ErrInvalidID = errors.New("ID is not in its proper form")
+// Set of error variables for handling product group errors.
+var (
+	ErrInvalidID = errors.New("ID is not in its proper form")
+)
 
 // Handlers manages the set of product endpoints.
 type Handlers struct {
-	Product *product.Core
-	Auth    *auth.Auth
+	product *product.Core
+	user    *user.Core
+}
+
+// New constructs a handlers for route access.
+func New(product *product.Core, user *user.Core) *Handlers {
+	return &Handlers{
+		product: product,
+		user:    user,
+	}
+}
+
+// executeUnderTransaction constructs a new Handlers value with the core apis
+// using a store transaction that was created via middleware.
+func (h *Handlers) executeUnderTransaction(ctx context.Context) (*Handlers, error) {
+	if tx, ok := transaction.Get(ctx); ok {
+		user, err := h.user.ExecuteUnderTransaction(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		product, err := h.product.ExecuteUnderTransaction(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		h = &Handlers{
+			user:    user,
+			product: product,
+		}
+
+		return h, nil
+	}
+
+	return h, nil
 }
 
 // Create adds a new product to the system.
-func (h Handlers) Create(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	var np product.NewProduct
-	if err := web.Decode(r, &np); err != nil {
-		return fmt.Errorf("unable to decode payload: %w", err)
+func (h *Handlers) Create(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	var anp AppNewProduct
+	if err := web.Decode(r, &anp); err != nil {
+		return v1.NewRequestError(err, http.StatusBadRequest)
 	}
 
-	prod, err := h.Product.Create(ctx, np)
+	np, err := toCoreNewProduct(anp)
 	if err != nil {
-		return fmt.Errorf("creating new product, np[%+v]: %w", np, err)
+		return v1.NewRequestError(err, http.StatusBadRequest)
 	}
 
-	return web.Respond(ctx, w, prod, http.StatusCreated)
+	prd, err := h.product.Create(ctx, np)
+	if err != nil {
+		return fmt.Errorf("Create -> Create: app[%+v]: %w", anp, err)
+	}
+
+	return web.Respond(ctx, w, toAppProduct(prd), http.StatusCreated)
 }
 
 // Update updates a product in the system.
-func (h Handlers) Update(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	var upd product.UpdateProduct
-	if err := web.Decode(r, &upd); err != nil {
+func (h *Handlers) Update(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	h, err := h.executeUnderTransaction(ctx)
+	if err != nil {
+		return err
+	}
+
+	var aup AppUpdateProduct
+	if err := web.Decode(r, &aup); err != nil {
 		return fmt.Errorf("unable to decode payload: %w", err)
 	}
 
-	prdID, err := uuid.Parse(web.Param(r, "id"))
+	productID, err := uuid.Parse(web.Param(r, "product_id"))
 	if err != nil {
-		return v1Web.NewRequestError(ErrInvalidID, http.StatusBadRequest)
+		return v1.NewRequestError(ErrInvalidID, http.StatusBadRequest)
 	}
 
-	prd, err := h.Product.QueryByID(ctx, prdID)
+	prd, err := h.product.QueryByID(ctx, productID)
 	if err != nil {
 		switch {
-		case errors.Is(err, product.ErrInvalidID):
-			return v1Web.NewRequestError(err, http.StatusBadRequest)
 		case errors.Is(err, product.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
+			return v1.NewRequestError(err, http.StatusNotFound)
 		default:
-			return fmt.Errorf("querying product[%s]: %w", prdID, err)
+			return fmt.Errorf("Update -> QueryByID: productID[%s]: %w", productID, err)
 		}
 	}
 
-	claims := auth.GetClaims(ctx)
-	if claims.Subject != prd.UserID.String() && h.Auth.Authorize(ctx, claims, auth.RuleAdminOnly) != nil {
-		return auth.NewAuthError("auth failed")
-	}
-
-	prd, err = h.Product.Update(ctx, prd, upd)
+	prd, err = h.product.Update(ctx, prd, toCoreUpdateProduct(aup))
 	if err != nil {
-		return fmt.Errorf("ID[%s] Product[%+v]: %w", prdID, &upd, err)
+		return fmt.Errorf("Update -> Update: productID[%s] app[%+v]: %w", productID, aup, err)
 	}
 
-	return web.Respond(ctx, w, prd, http.StatusOK)
+	return web.Respond(ctx, w, toAppProduct(prd), http.StatusOK)
 }
 
 // Delete removes a product from the system.
-func (h Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	prdID, err := uuid.Parse(web.Param(r, "id"))
+func (h *Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	h, err := h.executeUnderTransaction(ctx)
 	if err != nil {
-		return v1Web.NewRequestError(ErrInvalidID, http.StatusBadRequest)
+		return err
+	}
+	prdID, err := uuid.Parse(web.Param(r, "product_id"))
+	if err != nil {
+		return v1.NewRequestError(ErrInvalidID, http.StatusBadRequest)
 	}
 
-	prd, err := h.Product.QueryByID(ctx, prdID)
+	prd, err := h.product.QueryByID(ctx, prdID)
 	if err != nil {
 		switch {
 		case errors.Is(err, product.ErrInvalidID):
-			return v1Web.NewRequestError(err, http.StatusBadRequest)
+			return v1.NewRequestError(err, http.StatusBadRequest)
 		case errors.Is(err, product.ErrNotFound):
 
 			// Don't send StatusNotFound here since the call to Delete
 			// below won't if this product is not found. We only know
 			// this because we are doing the Query for the UserID.
-			return v1Web.NewRequestError(err, http.StatusNoContent)
+			return v1.NewRequestError(err, http.StatusNoContent)
 		default:
-			return fmt.Errorf("querying product[%s]: %w", prdID, err)
+			return fmt.Errorf("Delete -> QueryByID: productID[%s]: %w", prdID, err)
 		}
 	}
 
-	claims := auth.GetClaims(ctx)
-	if claims.Subject != prd.UserID.String() && h.Auth.Authorize(ctx, claims, auth.RuleAdminOnly) != nil {
-		return auth.NewAuthError("auth failed")
-	}
-
-	if err := h.Product.Delete(ctx, prd); err != nil {
-		switch {
-		case errors.Is(err, product.ErrInvalidID):
-			return v1Web.NewRequestError(err, http.StatusBadRequest)
-		default:
-			return fmt.Errorf("ID[%s]: %w", prdID, err)
-		}
+	if err := h.product.Delete(ctx, prd); err != nil {
+		return fmt.Errorf("Delete -> Delete: productID[%s]: %w", prdID, err)
 	}
 
 	return web.Respond(ctx, w, nil, http.StatusNoContent)
 }
 
 // Query returns a list of products with paging.
-func (h Handlers) Query(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	page := web.Param(r, "page")
-	pageNumber, err := strconv.Atoi(page)
+func (h *Handlers) Query(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	page, err := paging.ParseRequest(r)
 	if err != nil {
-		return v1Web.NewRequestError(fmt.Errorf("invalid page format, page[%s]", page), http.StatusBadRequest)
-	}
-	rows := web.Param(r, "rows")
-	rowsPerPage, err := strconv.Atoi(rows)
-	if err != nil {
-		return v1Web.NewRequestError(fmt.Errorf("invalid rows format, rows[%s]", rows), http.StatusBadRequest)
+		return err
 	}
 
-	filter, err := getFilter(r)
+	filter, err := parseFilter(r)
 	if err != nil {
-		return v1Web.NewRequestError(err, http.StatusBadRequest)
+		return err
 	}
 
-	orderBy, err := v1Web.GetOrderBy(r, product.DefaultOrderBy)
+	orderBy, err := parseOrder(r)
 	if err != nil {
-		return v1Web.NewRequestError(err, http.StatusBadRequest)
+		return err
 	}
 
-	products, err := h.Product.Query(ctx, filter, orderBy, pageNumber, rowsPerPage)
+	prds, err := h.product.Query(ctx, filter, orderBy, page.Number, page.RowsPerPage)
 	if err != nil {
-		return fmt.Errorf("unable to query for products: %w", err)
+		return fmt.Errorf("Query -> product.Query: %w", err)
 	}
 
-	return web.Respond(ctx, w, products, http.StatusOK)
-}
+	// -------------------------------------------------------------------------
+	// Capture the unique set of users
 
-// QueryByID returns a product by its ID.
-func (h Handlers) QueryByID(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	prdID, err := uuid.Parse(web.Param(r, "id"))
-	if err != nil {
-		return v1Web.NewRequestError(ErrInvalidID, http.StatusBadRequest)
-	}
+	users := make(map[uuid.UUID]user.User)
+	if len(prds) > 0 {
+		for _, prd := range prds {
+			users[prd.UserID] = user.User{}
+		}
 
-	prod, err := h.Product.QueryByID(ctx, prdID)
-	if err != nil {
-		switch {
-		case errors.Is(err, product.ErrInvalidID):
-			return v1Web.NewRequestError(err, http.StatusBadRequest)
-		case errors.Is(err, product.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
-		default:
-			return fmt.Errorf("ID[%s]: %w", prdID, err)
+		userIDs := make([]uuid.UUID, 0, len(users))
+		for userID := range users {
+			userIDs = append(userIDs, userID)
+		}
+
+		usrs, err := h.user.QueryByIDs(ctx, userIDs)
+		if err != nil {
+			return fmt.Errorf("Query -> user.QueryByIDs: userIDs[%s]: %w", userIDs, err)
+		}
+
+		for _, usr := range usrs {
+			users[usr.ID] = usr
 		}
 	}
 
-	return web.Respond(ctx, w, prod, http.StatusOK)
+	// -------------------------------------------------------------------------
+
+	total, err := h.product.Count(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("Query -> Count: %w", err)
+	}
+
+	return web.Respond(ctx, w, paging.NewResponse(toAppProductsDetails(prds, users), total, page.Number, page.RowsPerPage), http.StatusOK)
+}
+
+// QueryByID returns a product by its ID.
+func (h *Handlers) QueryByID(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	prdID, err := uuid.Parse(web.Param(r, "product_id"))
+	if err != nil {
+		return v1.NewRequestError(ErrInvalidID, http.StatusBadRequest)
+	}
+
+	prod, err := h.product.QueryByID(ctx, prdID)
+	if err != nil {
+		switch {
+		case errors.Is(err, product.ErrInvalidID):
+			return v1.NewRequestError(err, http.StatusBadRequest)
+		case errors.Is(err, product.ErrNotFound):
+			return v1.NewRequestError(err, http.StatusNotFound)
+		default:
+			return fmt.Errorf("QueryByID -> QueryByID: productID[%s]: %w", prdID, err)
+		}
+	}
+
+	return web.Respond(ctx, w, toAppProduct(prod), http.StatusOK)
 }
