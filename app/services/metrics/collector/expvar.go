@@ -1,4 +1,4 @@
-// Package collector is a simple collector for
+// Package collector provides functionality for collecting metrics from internal services
 package collector
 
 import (
