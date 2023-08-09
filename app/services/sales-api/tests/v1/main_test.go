@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"service/business/data/dbtest"
-	"service/foundation/docker"
+	"github.com/wtran29/go-service/business/data/dbtest"
+	"github.com/wtran29/go-service/foundation/docker"
 )
 
 var c *docker.Container
