@@ -8,15 +8,15 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/wtran29/go-service/business/core/event"
 	"github.com/wtran29/go-service/business/core/user"
 	"github.com/wtran29/go-service/business/core/user/stores/userdb"
-	"github.com/wtran29/go-service/business/sys/database"
-
-	"go.uber.org/zap"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
+	"github.com/wtran29/go-service/foundation/logger"
 )
 
 // Users retrieves all users from the database.
-func Users(log *zap.SugaredLogger, cfg database.Config, pageNumber string, rowsPerPage string) error {
+func Users(log *logger.Logger, cfg database.Config, pageNumber string, rowsPerPage string) error {
 	db, err := database.Open(cfg)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -36,7 +36,8 @@ func Users(log *zap.SugaredLogger, cfg database.Config, pageNumber string, rowsP
 		return fmt.Errorf("converting rows per page: %w", err)
 	}
 
-	core := user.NewCore(userdb.NewStore(log, db))
+	evnCore := event.NewCore(log)
+	core := user.NewCore(log, evnCore, userdb.NewStore(log, db))
 
 	users, err := core.Query(ctx, user.QueryFilter{}, user.DefaultOrderBy, page, rows)
 	if err != nil {

@@ -2,17 +2,19 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/wtran29/go-service/app/tooling/sales-admin/commands"
-	"github.com/wtran29/go-service/business/sys/database"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
+	"github.com/wtran29/go-service/foundation/logger"
 	"github.com/wtran29/go-service/foundation/vault"
 
 	"github.com/ardanlabs/conf/v3"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 var build = "develop"
@@ -30,7 +32,7 @@ type config struct {
 		DisableTLS   bool   `conf:"default:true"`
 	}
 	Vault struct {
-		KeysFolder string `conf:"default:containers/keys/"`
+		KeysFolder string `conf:"default:zContainers/keys/"`
 		Address    string `conf:"default:http://vault-service.sales-system.svc.cluster.local:8200"`
 		Token      string `conf:"default:mytoken,mask"`
 		MountPath  string `conf:"default:secret"`
@@ -38,15 +40,17 @@ type config struct {
 }
 
 func main() {
-	if err := run(zap.NewNop().Sugar()); err != nil {
+	log := logger.New(io.Discard, logger.LevelInfo, "ADMIN", func(context.Context) string { return "00000000-0000-0000-0000-000000000000" })
+
+	if err := run(log); err != nil {
 		if !errors.Is(err, commands.ErrHelp) {
-			fmt.Println("ERROR", err)
+			fmt.Println("msg", err)
 		}
 		os.Exit(1)
 	}
 }
 
-func run(log *zap.SugaredLogger) error {
+func run(log *logger.Logger) error {
 	cfg := config{
 		Version: conf.Version{
 			Build: build,
@@ -66,7 +70,7 @@ func run(log *zap.SugaredLogger) error {
 		if err != nil {
 			return fmt.Errorf("generating config for output: %w", err)
 		}
-		log.Infow("startup", "config", out)
+		log.Info(context.Background(), "startup", "config", out)
 
 		return fmt.Errorf("parsing config: %w", err)
 	}
@@ -76,7 +80,7 @@ func run(log *zap.SugaredLogger) error {
 
 // processCommands handles the execution of the commands specified on
 // the command line.
-func processCommands(args conf.Args, log *zap.SugaredLogger, cfg config) error {
+func processCommands(args conf.Args, log *logger.Logger, cfg config) error {
 	dbConfig := database.Config{
 		User:         cfg.DB.User,
 		Password:     cfg.DB.Password,

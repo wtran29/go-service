@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	database "github.com/wtran29/go-service/business/data/database/pgx"
 	"github.com/wtran29/go-service/business/data/schema"
-	"github.com/wtran29/go-service/business/sys/database"
 )
 
 // ErrHelp provides context that help was given.

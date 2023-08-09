@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/wtran29/go-service/business/core/event"
 	"github.com/wtran29/go-service/business/core/user"
 	"github.com/wtran29/go-service/business/core/user/stores/userdb"
-	"github.com/wtran29/go-service/business/sys/database"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
 	"github.com/wtran29/go-service/business/web/auth"
+	"github.com/wtran29/go-service/foundation/logger"
 	"github.com/wtran29/go-service/foundation/vault"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 // GenToken generates a JWT for the specified user.
-func GenToken(log *zap.SugaredLogger, dbConfig database.Config, vaultConfig vault.Config, userID uuid.UUID, kid string) error {
+func GenToken(log *logger.Logger, dbConfig database.Config, vaultConfig vault.Config, userID uuid.UUID, kid string) error {
 	if kid == "" {
 		fmt.Println("help: gentoken <user_id> <kid>")
 		return ErrHelp
@@ -32,7 +33,8 @@ func GenToken(log *zap.SugaredLogger, dbConfig database.Config, vaultConfig vaul
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	core := user.NewCore(userdb.NewStore(log, db))
+	evnCore := event.NewCore(log)
+	core := user.NewCore(log, evnCore, userdb.NewStore(log, db))
 
 	usr, err := core.QueryByID(ctx, userID)
 	if err != nil {

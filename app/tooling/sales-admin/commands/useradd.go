@@ -6,15 +6,15 @@ import (
 	"net/mail"
 	"time"
 
+	"github.com/wtran29/go-service/business/core/event"
 	"github.com/wtran29/go-service/business/core/user"
 	"github.com/wtran29/go-service/business/core/user/stores/userdb"
-	"github.com/wtran29/go-service/business/sys/database"
-
-	"go.uber.org/zap"
+	database "github.com/wtran29/go-service/business/data/database/pgx"
+	"github.com/wtran29/go-service/foundation/logger"
 )
 
 // UserAdd adds new users into the database.
-func UserAdd(log *zap.SugaredLogger, cfg database.Config, name, email, password string) error {
+func UserAdd(log *logger.Logger, cfg database.Config, name, email, password string) error {
 	if name == "" || email == "" || password == "" {
 		fmt.Println("help: useradd <name> <email> <password>")
 		return ErrHelp
@@ -29,7 +29,8 @@ func UserAdd(log *zap.SugaredLogger, cfg database.Config, name, email, password 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	core := user.NewCore(userdb.NewStore(log, db))
+	evnCore := event.NewCore(log)
+	core := user.NewCore(log, evnCore, userdb.NewStore(log, db))
 
 	addr, err := mail.ParseAddress(email)
 	if err != nil {
@@ -41,7 +42,7 @@ func UserAdd(log *zap.SugaredLogger, cfg database.Config, name, email, password 
 		Email:           *addr,
 		Password:        password,
 		PasswordConfirm: password,
-		Roles:           []string{user.RoleAdmin, user.RoleUser},
+		Roles:           []user.Role{user.RoleAdmin, user.RoleUser},
 	}
 
 	usr, err := core.Create(ctx, nu)
