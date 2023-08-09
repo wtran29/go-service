@@ -7,172 +7,234 @@ import (
 	"fmt"
 	"net/http"
 	"net/mail"
-	"strconv"
 	"time"
 
-	"service/business/core/user"
-	"service/business/web/auth"
-	v1Web "service/business/web/v1"
-	"service/foundation/web"
+	"github.com/wtran29/go-service/business/core/user"
+	"github.com/wtran29/go-service/business/core/usersummary"
+	"github.com/wtran29/go-service/business/data/transaction"
+	"github.com/wtran29/go-service/business/web/auth"
+	v1 "github.com/wtran29/go-service/business/web/v1"
+	"github.com/wtran29/go-service/business/web/v1/paging"
+	"github.com/wtran29/go-service/foundation/validate"
+	"github.com/wtran29/go-service/foundation/web"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/uuid"
 )
-
-var ErrInvalidID = errors.New("ID is not in its proper form")
 
 // Handlers manages the set of user endpoints.
 type Handlers struct {
-	User *user.Core
-	Auth *auth.Auth
+	user    *user.Core
+	summary *usersummary.Core
+	auth    *auth.Auth
+}
+
+// New constructs a handlers for route access.
+func New(user *user.Core, summary *usersummary.Core, auth *auth.Auth) *Handlers {
+	return &Handlers{
+		user:    user,
+		summary: summary,
+		auth:    auth,
+	}
+}
+
+// executeUnderTransaction constructs a new Handlers value with the core apis
+// using a store transaction that was created via middleware.
+func (h *Handlers) executeUnderTransaction(ctx context.Context) (*Handlers, error) {
+	if tx, ok := transaction.Get(ctx); ok {
+		user, err := h.user.ExecuteUnderTransaction(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		h = &Handlers{
+			user:    user,
+			summary: h.summary,
+			auth:    h.auth,
+		}
+
+		return h, nil
+	}
+
+	return h, nil
 }
 
 // Create adds a new user to the system.
-func (h Handlers) Create(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	var nu user.NewUser
-	if err := web.Decode(r, &nu); err != nil {
-		return fmt.Errorf("unable to decode payload: %w", err)
+func (h *Handlers) Create(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	var anu AppNewUser
+	if err := web.Decode(r, &anu); err != nil {
+		return v1.NewRequestError(err, http.StatusBadRequest)
 	}
 
-	usr, err := h.User.Create(ctx, nu)
+	cnu, err := toCoreNewUser(anu)
+	if err != nil {
+		return v1.NewRequestError(err, http.StatusBadRequest)
+	}
+
+	usr, err := h.user.Create(ctx, cnu)
 	if err != nil {
 		if errors.Is(err, user.ErrUniqueEmail) {
-			return v1Web.NewRequestError(err, http.StatusConflict)
+			return v1.NewRequestError(err, http.StatusConflict)
 		}
-		return fmt.Errorf("user[%+v]: %w", &usr, err)
+		return fmt.Errorf("Create -> user.Create: user[%+v]: %w", &usr, err)
 	}
 
-	return web.Respond(ctx, w, usr, http.StatusCreated)
+	return web.Respond(ctx, w, toAppUser(usr), http.StatusCreated)
 }
 
 // Update updates a user in the system.
-func (h Handlers) Update(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	var upd user.UpdateUser
-	if err := web.Decode(r, &upd); err != nil {
-		return fmt.Errorf("unable to decode payload: %w", err)
-	}
-
-	userID, err := uuid.Parse(web.Param(r, "id"))
+func (h *Handlers) Update(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	h, err := h.executeUnderTransaction(ctx)
 	if err != nil {
-		return v1Web.NewRequestError(ErrInvalidID, http.StatusBadRequest)
+		return err
+	}
+	var auu AppUpdateUser
+	if err := web.Decode(r, &auu); err != nil {
+		return v1.NewRequestError(err, http.StatusBadRequest)
 	}
 
-	claims := auth.GetClaims(ctx)
-	if claims.Subject != userID.String() && h.Auth.Authorize(ctx, claims, auth.RuleAdminOnly) != nil {
-		return auth.NewAuthError("auth failed")
-	}
+	userID := auth.GetUserID(ctx)
 
-	usr, err := h.User.QueryByID(ctx, userID)
+	usr, err := h.user.QueryByID(ctx, userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, user.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
+			return v1.NewRequestError(err, http.StatusNotFound)
 		default:
-			return fmt.Errorf("ID[%s]: %w", userID, err)
+			return fmt.Errorf("Update -> QueryByID :userID[%s]: %w", userID, err)
 		}
 	}
 
-	usr, err = h.User.Update(ctx, usr, upd)
+	cuu, err := toCoreUpdateUser(auu)
 	if err != nil {
-		return fmt.Errorf("ID[%s] User[%+v]: %w", userID, &upd, err)
+		return v1.NewRequestError(err, http.StatusBadRequest)
 	}
 
-	return web.Respond(ctx, w, usr, http.StatusOK)
+	usr, err = h.user.Update(ctx, usr, cuu)
+	if err != nil {
+		return fmt.Errorf("Update -> Update :userID[%s] cuu[%+v]: %w", userID, cuu, err)
+	}
+
+	return web.Respond(ctx, w, toAppUser(usr), http.StatusOK)
 }
 
 // Delete removes a user from the system.
-func (h Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	userID, err := uuid.Parse(web.Param(r, "id"))
+func (h *Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	userID := auth.GetUserID(ctx)
+
+	h, err := h.executeUnderTransaction(ctx)
 	if err != nil {
-		return v1Web.NewRequestError(ErrInvalidID, http.StatusBadRequest)
+		return err
 	}
 
-	claims := auth.GetClaims(ctx)
-	if claims.Subject != userID.String() && h.Auth.Authorize(ctx, claims, auth.RuleAdminOnly) != nil {
-		return auth.NewAuthError("auth failed")
-	}
-
-	usr, err := h.User.QueryByID(ctx, userID)
+	usr, err := h.user.QueryByID(ctx, userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, user.ErrNotFound):
 			return web.Respond(ctx, w, nil, http.StatusNoContent)
 		default:
-			return fmt.Errorf("ID[%s]: %w", userID, err)
+			return fmt.Errorf("Delete -> QueryByID :userID[%s]: %w", userID, err)
 		}
 	}
 
-	if err := h.User.Delete(ctx, usr); err != nil {
-		return fmt.Errorf("ID[%s]: %w", userID, err)
+	if err := h.user.Delete(ctx, usr); err != nil {
+		return fmt.Errorf("Delete -> Delete :userID[%s]: %w", userID, err)
 	}
 
 	return web.Respond(ctx, w, nil, http.StatusNoContent)
 }
 
 // Query returns a list of users with paging.
-func (h Handlers) Query(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	page := web.Param(r, "page")
-	pageNumber, err := strconv.Atoi(page)
+func (h *Handlers) Query(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	page, err := paging.ParseRequest(r)
 	if err != nil {
-		return v1Web.NewRequestError(fmt.Errorf("invalid page format [%s]", page), http.StatusBadRequest)
-	}
-	rows := web.Param(r, "rows")
-	rowsPerPage, err := strconv.Atoi(rows)
-	if err != nil {
-		return v1Web.NewRequestError(fmt.Errorf("invalid rows format [%s]", rows), http.StatusBadRequest)
+		return err
 	}
 
-	filter, err := getFilter(r)
+	filter, err := parseFilter(r)
 	if err != nil {
-		return v1Web.NewRequestError(err, http.StatusBadRequest)
+		return err
 	}
 
-	orderBy, err := v1Web.GetOrderBy(r, user.DefaultOrderBy)
+	orderBy, err := parseOrder(r)
 	if err != nil {
-		return v1Web.NewRequestError(err, http.StatusBadRequest)
+		return err
 	}
 
-	users, err := h.User.Query(ctx, filter, orderBy, pageNumber, rowsPerPage)
+	users, err := h.user.Query(ctx, filter, orderBy, page.Number, page.RowsPerPage)
 	if err != nil {
-		if errors.Is(err, user.ErrInvalidOrder) {
-			return v1Web.NewRequestError(err, http.StatusBadRequest)
-		}
-		return fmt.Errorf("unable to query for users: %w", err)
+		return fmt.Errorf("Query -> user.Query: %w", err)
 	}
 
-	return web.Respond(ctx, w, users, http.StatusOK)
+	items := make([]AppUser, len(users))
+	for i, usr := range users {
+		items[i] = toAppUser(usr)
+	}
+
+	total, err := h.user.Count(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("Query -> user.Count: %w", err)
+	}
+
+	return web.Respond(ctx, w, paging.NewResponse(items, total, page.Number, page.RowsPerPage), http.StatusOK)
 }
 
 // QueryByID returns a user by its ID.
-func (h Handlers) QueryByID(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	userID, err := uuid.Parse(web.Param(r, "id"))
-	if err != nil {
-		return v1Web.NewRequestError(ErrInvalidID, http.StatusBadRequest)
-	}
+func (h *Handlers) QueryByID(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	id := auth.GetUserID(ctx)
 
-	claims := auth.GetClaims(ctx)
-	if claims.Subject != userID.String() && h.Auth.Authorize(ctx, claims, auth.RuleAdminOnly) != nil {
-		return auth.NewAuthError("auth failed")
-	}
-
-	usr, err := h.User.QueryByID(ctx, userID)
+	usr, err := h.user.QueryByID(ctx, id)
 	if err != nil {
 		switch {
 		case errors.Is(err, user.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
+			return v1.NewRequestError(err, http.StatusNotFound)
 		default:
-			return fmt.Errorf("ID[%s]: %w", userID, err)
+			return fmt.Errorf("QueryByID: id[%s]: %w", id, err)
 		}
 	}
 
-	return web.Respond(ctx, w, usr, http.StatusOK)
+	return web.Respond(ctx, w, toAppUser(usr), http.StatusOK)
+}
+
+// QuerySummary returns a list of user summary data with paging.
+func (h *Handlers) QuerySummary(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	page, err := paging.ParseRequest(r)
+	if err != nil {
+		return err
+	}
+
+	filter, err := parseSummaryFilter(r)
+	if err != nil {
+		return err
+	}
+
+	orderBy, err := parseSummaryOrder(r)
+	if err != nil {
+		return err
+	}
+
+	smms, err := h.summary.Query(ctx, filter, orderBy, page.Number, page.RowsPerPage)
+	if err != nil {
+		return fmt.Errorf("QuerySummary -> summary.Query: %w", err)
+	}
+
+	items := make([]AppUserSummary, len(smms))
+	for i, smm := range smms {
+		items[i] = toAppUserSummary(smm)
+	}
+
+	total, err := h.summary.Count(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("QuerySummary -> summary.Count: %w", err)
+	}
+
+	return web.Respond(ctx, w, paging.NewResponse(items, total, page.Number, page.RowsPerPage), http.StatusOK)
 }
 
 // Token provides an API token for the authenticated user.
-func (h Handlers) Token(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *Handlers) Token(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	kid := web.Param(r, "kid")
 	if kid == "" {
-		return v1Web.NewRequestError(errors.New("missing kid"), http.StatusBadRequest)
+		return validate.NewFieldsError("Token -> kid", errors.New("missing kid"))
 	}
 
 	email, pass, ok := r.BasicAuth()
@@ -185,15 +247,15 @@ func (h Handlers) Token(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		return auth.NewAuthError("invalid email format")
 	}
 
-	usr, err := h.User.Authenticate(ctx, *addr, pass)
+	usr, err := h.user.Authenticate(ctx, *addr, pass)
 	if err != nil {
 		switch {
 		case errors.Is(err, user.ErrNotFound):
-			return v1Web.NewRequestError(err, http.StatusNotFound)
+			return v1.NewRequestError(err, http.StatusNotFound)
 		case errors.Is(err, user.ErrAuthenticationFailure):
 			return auth.NewAuthError(err.Error())
 		default:
-			return fmt.Errorf("authenticating: %w", err)
+			return fmt.Errorf("Token -> Authenticate: %w", err)
 		}
 	}
 
@@ -210,9 +272,9 @@ func (h Handlers) Token(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	var tkn struct {
 		Token string `json:"token"`
 	}
-	tkn.Token, err = h.Auth.GenerateToken(kid, claims)
+	tkn.Token, err = h.auth.GenerateToken(kid, claims)
 	if err != nil {
-		return fmt.Errorf("generating token: %w", err)
+		return fmt.Errorf("Token -> GenerateToken: %w", err)
 	}
 
 	return web.Respond(ctx, w, tkn, http.StatusOK)
