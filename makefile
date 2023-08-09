@@ -2,8 +2,7 @@
 SHELL_PATH = /bin/ash
 SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 
-run-local:
-	go run app/services/sales-api/main.go
+
 
 
 # Deploy First Mentality
@@ -149,16 +148,16 @@ run-local:
 
 GOLANG          := golang:1.20
 ALPINE          := alpine:3.18
-KIND            := kindest/node:v1.27.1
+KIND            := kindest/node:v1.27.3
 POSTGRES        := postgres:15.3
 VAULT           := hashicorp/vault:1.13
 ZIPKIN          := openzipkin/zipkin:2.24
 TELEPRESENCE    := datawire/tel2:2.13.2
 
-KIND_CLUSTER    := ardan-starter-cluster
+KIND_CLUSTER    := sales-starter-cluster
 NAMESPACE       := sales-system
 APP             := sales
-BASE_IMAGE_NAME := ardanlabs/service
+BASE_IMAGE_NAME := wtran4hire/service
 SERVICE_NAME    := sales-api
 VERSION         := 0.0.1
 SERVICE_IMAGE   := $(BASE_IMAGE_NAME)/$(SERVICE_NAME):$(VERSION)
@@ -197,13 +196,17 @@ dev-docker:
 	docker pull $(KIND)
 	docker pull $(POSTGRES)
 	docker pull $(VAULT)
-	docker pull $(ZIPKIN)
+	docker pull $(GRAFANA)
+	docker pull $(PROMETHEUS)
+	docker pull $(TEMPO)
+	docker pull $(LOKI)
+	docker pull $(PROMTAIL)
 	docker pull $(TELEPRESENCE)
 
 # ==============================================================================
 # Building containers
 
-all: service metrics
+all: service 
 
 service:
 	docker build \
@@ -235,10 +238,19 @@ dev-up-local:
 	kind load docker-image $(TELEPRESENCE) --name $(KIND_CLUSTER)
 	kind load docker-image $(POSTGRES) --name $(KIND_CLUSTER)
 	kind load docker-image $(VAULT) --name $(KIND_CLUSTER)
-	kind load docker-image $(ZIPKIN) --name $(KIND_CLUSTER)
+	kind load docker-image $(GRAFANA) --name $(KIND_CLUSTER)
+	kind load docker-image $(PROMETHEUS) --name $(KIND_CLUSTER)
+	kind load docker-image $(TEMPO) --name $(KIND_CLUSTER)
+	kind load docker-image $(LOKI) --name $(KIND_CLUSTER)
+	kind load docker-image $(PROMTAIL) --name $(KIND_CLUSTER)
+
+dev-tel:
+# kind load docker-image $(TELEPRESENCE) --name $(KIND_CLUSTER)
+	telepresence --context=kind-$(KIND_CLUSTER) helm install --request-timeout 2m 
+	telepresence --context=kind-$(KIND_CLUSTER) connect
 
 dev-up: dev-up-local
-	telepresence --context=kind-$(KIND_CLUSTER) helm install
+	telepresence --context=kind-$(KIND_CLUSTER) helm install 
 	telepresence --context=kind-$(KIND_CLUSTER) connect
 
 dev-down-local:
@@ -249,6 +261,15 @@ dev-down:
 	kind delete cluster --name $(KIND_CLUSTER)
 
 # ------------------------------------------------------------------------------
+
+run-scratch:
+	go run app/tooling/scratch/main.go
+
+run-local:
+	go run app/services/sales-api/main.go | go run app/tooling/logfmt/main.go -service=sales-api
+
+run-local-help:
+	go run app/services/sales-api/main.go --help
 
 dev-load:
 	cd zContainers/k8s/dev/sales; kustomize edit set image service-image=$(SERVICE_IMAGE)
@@ -263,18 +284,34 @@ dev-apply:
 	kustomize build zContainers/k8s/dev/database | kubectl apply -f -
 	kubectl rollout status --namespace=$(NAMESPACE) --watch --timeout=120s sts/database
 
-	kustomize build zContainers/k8s/dev/zipkin | kubectl apply -f -
-	kubectl wait pods --namespace=$(NAMESPACE) --selector app=zipkin --for=condition=Ready
+# kustomize build zContainers/k8s/dev/zipkin | kubectl apply -f -
+# kubectl wait pods --namespace=$(NAMESPACE) --selector app=zipkin --for=condition=Ready
+
+	
+	kustomize build zContainers/k8s/dev/grafana | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=grafana --timeout=120s --for=condition=Ready
+
+	kustomize build zContainers/k8s/dev/prometheus | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=prometheus --timeout=120s --for=condition=Ready
+
+	kustomize build zContainers/k8s/dev/tempo | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=tempo --timeout=120s --for=condition=Ready
+
+	kustomize build zContainers/k8s/dev/loki | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=loki --timeout=120s --for=condition=Ready
+
+	kustomize build zContainers/k8s/dev/promtail | kubectl apply -f -
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=promtail --timeout=120s --for=condition=Ready
 
 	kustomize build zContainers/k8s/dev/sales | kubectl apply -f -
-	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(APP) --for=condition=Ready
+	kubectl wait pods --namespace=$(NAMESPACE) --selector app=$(APP) --timeout=120s --for=condition=Ready
 
 dev-restart:
 	kubectl rollout restart deployment $(APP) --namespace=$(NAMESPACE)
 
 dev-update: all dev-load dev-restart
 
-dev-update-apply: all dev-load dev-apply
+dev-update-apply: all dev-load dev-apply dev-restart
 
 # ------------------------------------------------------------------------------
 
@@ -302,6 +339,9 @@ dev-describe-deployment:
 dev-describe-sales:
 	kubectl describe pod --namespace=$(NAMESPACE) -l app=$(APP)
 
+dev-describe-telepresence:
+	kubectl describe pod --namespace=ambassador -l app=traffic-manager
+
 # ------------------------------------------------------------------------------
 
 dev-logs-vault:
@@ -310,14 +350,30 @@ dev-logs-vault:
 dev-logs-db:
 	kubectl logs --namespace=$(NAMESPACE) -l app=database --all-containers=true -f --tail=100
 
-dev-logs-zipkin:
-	kubectl logs --namespace=$(NAMESPACE) -l app=zipkin --all-containers=true -f --tail=100
+# dev-logs-zipkin:
+# 	kubectl logs --namespace=$(NAMESPACE) -l app=zipkin --all-containers=true -f --tail=100
+
+dev-logs-grafana:
+	kubectl logs --namespace=$(NAMESPACE) -l app=grafana --all-containers=true -f --tail=100
+
+dev-logs-tempo:
+	kubectl logs --namespace=$(NAMESPACE) -l app=tempo --all-containers=true -f --tail=100
+
+dev-logs-loki:
+	kubectl logs --namespace=$(NAMESPACE) -l app=loki --all-containers=true -f --tail=100
+
+dev-logs-promtail:
+	kubectl logs --namespace=$(NAMESPACE) -l app=promtail --all-containers=true -f --tail=100
 
 # ------------------------------------------------------------------------------
 
 dev-services-delete:
 	kustomize build zContainers/k8s/dev/sales | kubectl delete -f -
-	kustomize build zContainers/k8s/dev/zipkin | kubectl delete -f -
+# 	kustomize build zContainers/k8s/dev/zipkin | kubectl delete -f -
+	kustomize build zContainers/k8s/dev/grafana | kubectl delete -f -
+	kustomize build zContainers/k8s/dev/tempo | kubectl delete -f -
+	kustomize build zContainers/k8s/dev/loki | kubectl delete -f -
+	kustomize build zContainers/k8s/dev/promtail | kubectl delete -f -
 	kustomize build zContainers/k8s/dev/database | kubectl delete -f -
 
 dev-describe-replicaset:
@@ -352,22 +408,22 @@ token-gen:
 	go run app/tooling/sales-admin/main.go gentoken 5cf37266-3473-4006-984f-9325122678b7 54bb2165-71e1-41a6-af3e-7da4a0e1e2c1
 
 pgcli-local:
-	pgcli postgresql://postgres:postgres@localhost
+	psql postgresql://postgres:postgres@localhost
 
 pgcli:
-	pgcli postgresql://postgres:postgres@database-service.$(NAMESPACE).svc.cluster.local
+	psql postgresql://postgres:postgres@database-service.$(NAMESPACE).svc.cluster.local
 
 liveness-local:
 	curl -il http://localhost:3000/v1/liveness
 
 liveness:
-	curl -il http://$(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/v1/liveness
+	curl -il http://$(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/debug/liveness
 
 readiness-local:
 	curl -il http://localhost:3000/v1/readiness
 
 readiness:
-	curl -il http://$(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/v1/readiness
+	curl -il http://$(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/debug/readiness
 
 # ==============================================================================
 # Metrics and Tracing
@@ -384,11 +440,18 @@ metrics-view-local:
 metrics-view:
 	expvarmon -ports="$(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3001" -endpoint="/metrics" -vars="build,requests,goroutines,errors,panics,mem:memstats.Alloc"
 
-zipkin-local:
-	open -a "Google Chrome" http://localhost:9411/zipkin/
+# zipkin-local:
+# 	open -a "Google Chrome" http://localhost:9411/zipkin/
 
-zipkin:
-	open -a "Google Chrome" http://zipkin-service.$(NAMESPACE).svc.cluster.local:9411/zipkin/
+# zipkin:
+# 	open -a "Google Chrome" http://zipkin-service.$(NAMESPACE).svc.cluster.local:9411/zipkin/
+
+
+grafana-local:
+	open -a "Google Chrome" http://localhost:3100/
+
+grafana:
+	open -a "Google Chrome" http://grafana-service.$(NAMESPACE).svc.cluster.local:3100/
 
 # ==============================================================================
 # Running tests within the local computer
@@ -458,3 +521,47 @@ deps-cleancache:
 
 list:
 	go list -mod=mod all
+
+# ==============================================================================
+# Admin Frontend
+
+ADMIN_FRONTEND_PREFIX := ./app/frontends/admin
+
+write-token-to-env:
+	echo "NEXT_PUBLIC_BASE_API_URL=http://localhost:3000/v1" > ${ADMIN_FRONTEND_PREFIX}/.env
+	make token | grep -o '"ey.*"' | awk '{print "NEXT_PUBLIC_TOKEN="$$1}' >> ${ADMIN_FRONTEND_PREFIX}/.env
+
+admin-gui-install:
+	npm install --prefix ${ADMIN_FRONTEND_PREFIX}
+
+admin-gui-dev: admin-gui-install
+	npm run dev --prefix ${ADMIN_FRONTEND_PREFIX}
+
+admin-gui-build: admin-gui-install
+	npm run build --prefix ${ADMIN_FRONTEND_PREFIX}
+
+admin-gui-start-build: admin-gui-build
+	npm run start --prefix ${ADMIN_FRONTEND_PREFIX}
+
+admin-gui-run: write-token-to-env admin-gui-start-build
+
+# ============================================================================
+# Scratch
+
+test-endpoint:
+	curl -il $(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/test
+
+test-endpoint-local:
+	curl -il localhost:3000/test
+
+test-endpoint-auth:
+	curl -il -H "Authorization: Bearer ${TOKEN}"  $(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/test/auth
+
+test-endpoint-auth-local:
+	curl -il -H "Authorization: Bearer ${TOKEN}" localhost:3000/test/auth
+
+migrate:
+	go run app/tooling/admin/main.go
+
+query:
+	@curl -i $(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/users?page=1&rows=2&orderBy=name
