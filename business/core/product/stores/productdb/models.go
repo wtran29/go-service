@@ -1,23 +1,20 @@
 package productdb
 
 import (
-	"fmt"
-	"service/business/core/product"
-	"service/business/data/order"
 	"time"
+
+	"github.com/wtran29/go-service/business/core/product"
 
 	"github.com/google/uuid"
 )
 
 // dbProduct represents an individual product.
 type dbProduct struct {
-	ID          string    `db:"product_id"`   // Unique identifier.
+	ID          uuid.UUID `db:"product_id"`   // Unique identifier.
+	UserID      uuid.UUID `db:"user_id"`      // ID of the user who created the product.
 	Name        string    `db:"name"`         // Display name of the product.
-	Cost        int       `db:"cost"`         // Price for one item in cents.
+	Cost        float64   `db:"cost"`         // Price for one item in cents.
 	Quantity    int       `db:"quantity"`     // Original number of items available.
-	Sold        int       `db:"sold"`         // Aggregate field showing number of items sold.
-	Revenue     int       `db:"revenue"`      // Aggregate field showing total cost of sold items.
-	UserID      string    `db:"user_id"`      // ID of the user who created the product.
 	DateCreated time.Time `db:"date_created"` // When the product was added.
 	DateUpdated time.Time `db:"date_updated"` // When the product record was last modified.
 }
@@ -26,13 +23,11 @@ type dbProduct struct {
 
 func toDBProduct(prd product.Product) dbProduct {
 	prdDB := dbProduct{
-		ID:          prd.ID.String(),
+		ID:          prd.ID,
+		UserID:      prd.UserID,
 		Name:        prd.Name,
 		Cost:        prd.Cost,
 		Quantity:    prd.Quantity,
-		Sold:        prd.Sold,
-		Revenue:     prd.Revenue,
-		UserID:      prd.UserID.String(),
 		DateCreated: prd.DateCreated.UTC(),
 		DateUpdated: prd.DateUpdated.UTC(),
 	}
@@ -42,13 +37,11 @@ func toDBProduct(prd product.Product) dbProduct {
 
 func toCoreProduct(dbPrd dbProduct) product.Product {
 	prd := product.Product{
-		ID:          uuid.MustParse(dbPrd.ID),
+		ID:          dbPrd.ID,
+		UserID:      dbPrd.UserID,
 		Name:        dbPrd.Name,
 		Cost:        dbPrd.Cost,
 		Quantity:    dbPrd.Quantity,
-		Sold:        dbPrd.Sold,
-		Revenue:     dbPrd.Revenue,
-		UserID:      uuid.MustParse(dbPrd.UserID),
 		DateCreated: dbPrd.DateCreated.In(time.Local),
 		DateUpdated: dbPrd.DateUpdated.In(time.Local),
 	}
@@ -62,32 +55,4 @@ func toCoreProductSlice(dbProducts []dbProduct) []product.Product {
 		prds[i] = toCoreProduct(dbPrd)
 	}
 	return prds
-}
-
-// =============================================================================
-
-// orderByfields is the map of fields that is used to translate between the
-// application layer names and the database.
-var orderByFields = map[string]string{
-	product.OrderByID:       "product_id",
-	product.OrderByName:     "name",
-	product.OrderByCost:     "cost",
-	product.OrderByQuantity: "quantity",
-	product.OrderBySold:     "sold",
-	product.OrderByRevenue:  "revenue",
-	product.OrderByUserID:   "user_id",
-}
-
-// orderByClause validates the order by for correct fields and sql injection.
-func orderByClause(orderBy order.By) (string, error) {
-	if err := order.Validate(orderBy.Field, orderBy.Direction); err != nil {
-		return "", err
-	}
-
-	by, exists := orderByFields[orderBy.Field]
-	if !exists {
-		return "", fmt.Errorf("field %q does not exist", orderBy.Field)
-	}
-
-	return by + " " + orderBy.Direction, nil
 }

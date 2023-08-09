@@ -1,34 +1,45 @@
 package product
 
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/wtran29/go-service/foundation/validate"
+)
+
 // QueryFilter holds the available fields filters to search
 // for schedules on the store.
 type QueryFilter struct {
-	ID       *string `validate:"omitempty,uuid4"`
-	Name     *string `validate:"omitempty,min=3"`
-	Cost     *int    `validate:"omitempty,numeric"`
-	Quantity *int    `validate:"omitempty,numeric"`
+	ID       *uuid.UUID `validate:"omitempty"`
+	Name     *string    `validate:"omitempty,min=3"`
+	Cost     *float64   `validate:"omitempty,numeric"`
+	Quantity *int       `validate:"omitempty,numeric"`
 }
 
-// ByID sets the ID field of the QueryFilter value.
-func (f *QueryFilter) ByID(id string) {
-	if id != "" {
-		f.ID = &id
+// Validate checks the data in the model is considered clean.
+func (qf *QueryFilter) Validate() error {
+	if err := validate.Check(qf); err != nil {
+		return fmt.Errorf("validate: %w", err)
 	}
+	return nil
 }
 
-// ByName sets the Name field of the QueryFilter value.
-func (f *QueryFilter) ByName(name string) {
-	if name != "" {
-		f.Name = &name
-	}
+// WithProductID sets the ID field of the QueryFilter value.
+func (qf *QueryFilter) WithProductID(productID uuid.UUID) {
+	qf.ID = &productID
 }
 
-// ByCost sets the Cost field of the QueryFilter value.
-func (f *QueryFilter) ByCost(cost int) {
-	f.Cost = &cost
+// WithName sets the Name field of the QueryFilter value.
+func (qf *QueryFilter) WithName(name string) {
+	qf.Name = &name
 }
 
-// ByQuantity sets the Quantity field of the QueryFilter value.
-func (f *QueryFilter) ByQuantity(quantity int) {
-	f.Quantity = &quantity
+// WithCost sets the Cost field of the QueryFilter value.
+func (qf *QueryFilter) WithCost(cost float64) {
+	qf.Cost = &cost
+}
+
+// WithQuantity sets the Quantity field of the QueryFilter value.
+func (qf *QueryFilter) WithQuantity(quantity int) {
+	qf.Quantity = &quantity
 }
