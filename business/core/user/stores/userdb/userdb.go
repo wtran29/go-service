@@ -96,7 +96,7 @@ func (s *Store) Update(ctx context.Context, usr user.User) error {
 // Delete removes a user from the database.
 func (s *Store) Delete(ctx context.Context, usr user.User) error {
 	data := struct {
-		UserID string `database:"user_id"`
+		UserID string `db:"user_id"`
 	}{
 		UserID: usr.ID.String(),
 	}

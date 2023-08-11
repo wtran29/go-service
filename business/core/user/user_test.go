@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wtran29/go-service/business/core/product"
 	"github.com/wtran29/go-service/business/core/user"
 	"github.com/wtran29/go-service/business/data/dbtest"
 	"github.com/wtran29/go-service/business/data/order"
@@ -39,7 +40,7 @@ func Test_User(t *testing.T) {
 // =============================================================================
 
 func crud(t *testing.T) {
-	seed := func(ctx context.Context, usrCore *user.Core) ([]user.User, error) {
+	seed := func(ctx context.Context, usrCore *user.Core, prdCore *product.Core) ([]user.User, error) {
 		usrs, err := usrCore.Query(ctx, user.QueryFilter{}, order.By{Field: user.OrderByName, Direction: order.ASC}, 1, 1)
 		if err != nil {
 			return nil, fmt.Errorf("seeding users : %w", err)
@@ -66,7 +67,7 @@ func crud(t *testing.T) {
 
 	t.Log("Go seeding ...")
 
-	usrs, err := seed(ctx, api.User)
+	usrs, err := seed(ctx, api.User, api.Product)
 	if err != nil {
 		t.Fatalf("Seeding error: %s", err)
 	}
