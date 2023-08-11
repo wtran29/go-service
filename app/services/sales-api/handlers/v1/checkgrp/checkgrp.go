@@ -29,7 +29,7 @@ func New(build string, db *sqlx.DB) *Handlers {
 // Readiness checks if the database is ready and if not will return a 500 status.
 // Do not respond by just returning an error because further up in the call
 // stack it will interpret that as a non-trusted error.
-func (h Handlers) Readiness(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *Handlers) Readiness(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -62,7 +62,7 @@ func (h Handlers) Readiness(ctx context.Context, w http.ResponseWriter, r *http.
 // app is deployed to a Kubernetes cluster, it will also return pod, node, and
 // namespace details via the Downward API. The Kubernetes environment variables
 // need to be set within your Pod/Deployment manifest.
-func (h Handlers) Liveness(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *Handlers) Liveness(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	ctx, span := web.AddSpan(ctx, "v1.liveness")
 	defer span.End()
 

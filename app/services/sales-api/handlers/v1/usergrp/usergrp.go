@@ -75,7 +75,7 @@ func (h *Handlers) Create(ctx context.Context, w http.ResponseWriter, r *http.Re
 		if errors.Is(err, user.ErrUniqueEmail) {
 			return v1.NewRequestError(err, http.StatusConflict)
 		}
-		return fmt.Errorf("Create -> user.Create: user[%+v]: %w", &usr, err)
+		return fmt.Errorf("Create -> user.Create: user[%+v]: %w", usr, err)
 	}
 
 	return web.Respond(ctx, w, toAppUser(usr), http.StatusCreated)

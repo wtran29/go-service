@@ -130,8 +130,8 @@ func (h *Handlers) Delete(ctx context.Context, w http.ResponseWriter, r *http.Re
 	prd, err := h.product.QueryByID(ctx, prdID)
 	if err != nil {
 		switch {
-		case errors.Is(err, product.ErrInvalidID):
-			return v1.NewRequestError(err, http.StatusBadRequest)
+		// case errors.Is(err, product.ErrInvalidID):
+		// 	return v1.NewRequestError(err, http.StatusBadRequest)
 		case errors.Is(err, product.ErrNotFound):
 
 			// Don't send StatusNotFound here since the call to Delete

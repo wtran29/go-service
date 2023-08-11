@@ -59,23 +59,23 @@ func Routes(app *web.App, cfg Config) {
 
 	ugh := usergrp.New(usrCore, usmCore, cfg.Auth)
 
-	app.Handle(http.MethodGet, version, "/users/token/:kid", ugh.Token)
+	app.Handle(http.MethodGet, version, "/users/token/{kid}", ugh.Token)
 	app.Handle(http.MethodGet, version, "/users", ugh.Query, authen, ruleAdmin)
-	app.Handle(http.MethodGet, version, "/users/:user_id", ugh.QueryByID, authen, ruleAdminOrSubject)
+	app.Handle(http.MethodGet, version, "/users/{user_id}", ugh.QueryByID, authen, ruleAdminOrSubject)
 	app.Handle(http.MethodGet, version, "/users/summary", ugh.QuerySummary, authen, ruleAdmin)
 	app.Handle(http.MethodPost, version, "/users", ugh.Create, authen, ruleAdmin)
-	app.Handle(http.MethodPut, version, "/users/:user_id", ugh.Update, authen, ruleAdminOrSubject, tran)
-	app.Handle(http.MethodDelete, version, "/users/:user_id", ugh.Delete, authen, ruleAdminOrSubject, tran)
+	app.Handle(http.MethodPut, version, "/users/{user_id}", ugh.Update, authen, ruleAdminOrSubject, tran)
+	app.Handle(http.MethodDelete, version, "/users/{user_id}", ugh.Delete, authen, ruleAdminOrSubject, tran)
 
 	// -------------------------------------------------------------------------
 
 	pgh := productgrp.New(prdCore, usrCore)
 
 	app.Handle(http.MethodGet, version, "/products", pgh.Query, authen)
-	app.Handle(http.MethodGet, version, "/products/:product_id", pgh.QueryByID, authen)
+	app.Handle(http.MethodGet, version, "/products/{product_id}", pgh.QueryByID, authen)
 	app.Handle(http.MethodPost, version, "/products", pgh.Create, authen)
-	app.Handle(http.MethodPut, version, "/products/:product_id", pgh.Update, authen, tran)
-	app.Handle(http.MethodDelete, version, "/products/:product_id", pgh.Delete, authen, tran)
+	app.Handle(http.MethodPut, version, "/products/{product_id}", pgh.Update, authen, tran)
+	app.Handle(http.MethodDelete, version, "/products/{product_id}", pgh.Delete, authen, tran)
 
 	// -------------------------------------------------------------------------
 
