@@ -25,7 +25,8 @@ type Handler func(ctx context.Context, w http.ResponseWriter, r *http.Request) e
 // object for each of our http handlers. Feel free to add any configuration
 // data/logic on this App struct.
 type App struct {
-	mux      *chi.Mux
+	mux *chi.Mux
+	// mux      *httptreemux.ContextMux
 	otmux    http.Handler
 	shutdown chan os.Signal
 	mw       []Middleware
@@ -43,6 +44,12 @@ func NewApp(shutdown chan os.Signal, tracer trace.Tracer, mw ...Middleware) *App
 	// https://w3c.github.io/trace-context/
 
 	mux := chi.NewMux()
+	// mux.Use(middleware.RequestID)
+	// mux.Use(middleware.RealIP)
+	// mux.Use(middleware.Logger)
+	// mux.Use(middleware.Recoverer)
+
+	// mux := httptreemux.NewContextMux()
 
 	return &App{
 		mux:      mux,
@@ -109,6 +116,9 @@ func (a *App) handle(method string, group string, path string, handler Handler) 
 		finalPath = "/" + group + path
 	}
 
+	// using httptreemux
+	// a.mux.Handle(method, finalPath, h)
+	// using chi
 	a.mux.MethodFunc(method, finalPath, h)
 }
 

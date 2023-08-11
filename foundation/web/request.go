@@ -12,7 +12,13 @@ type validator interface {
 	Validate() error
 }
 
-// Param returns the web call parameters from the request.
+// Param returns the web call parameters from the request for httptreemux.
+// func Param(r *http.Request, key string) string {
+// 	m := httptreemux.ContextParams(r.Context())
+// 	return m[key]
+// }
+
+// Param returns the web call parameters from the request for Chi.
 func Param(r *http.Request, key string) string {
 	p := chi.URLParamFromCtx(r.Context(), key)
 	return p
