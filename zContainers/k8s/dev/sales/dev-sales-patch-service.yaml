@@ -17,3 +17,9 @@ spec:
   - name: sales-api-debug
     port: 4000
     targetPort: sales-api-debug
+  - name: metrics
+    port: 3001
+    targetPort: metrics
+  - name: prometheus
+    port: 3002
+    targetPort: prometheus

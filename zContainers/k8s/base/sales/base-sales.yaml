@@ -25,17 +25,17 @@ spec:
       terminationGracePeriodSeconds: 60
 
       initContainers:
-      - name: init-migrate
-        image: service-image
-        command: ['./admin']
-
       # - name: init-migrate
       #   image: service-image
-      #   command: ['./sales-admin', 'migrate']
+      #   command: ['./admin']
 
-      # - name: init-seed
-      #   image: service-image
-      #   command: ['./sales-admin', 'seed']
+      - name: init-migrate
+        image: service-image
+        command: ['./sales-admin', 'migrate']
+
+      - name: init-seed
+        image: service-image
+        command: ['./sales-admin', 'seed']
 
       containers:
       - name: sales-api
@@ -49,8 +49,8 @@ spec:
 
         readinessProbe: # readiness probes mark the service available to accept traffic.
           httpGet:
-            path: /debug/readiness
-            port: 4000
+            path: /v1/readiness
+            port: 3000
           initialDelaySeconds: 5
           periodSeconds: 15
           timeoutSeconds: 5
@@ -59,10 +59,10 @@ spec:
 
         livenessProbe: # liveness probes mark the service alive or dead (to be restarted).
           httpGet:
-            path: /debug/liveness
-            port: 4000
+            path: /v1/liveness
+            port: 3000
           initialDelaySeconds: 2
-          periodSeconds: 30
+          periodSeconds: 10
           timeoutSeconds: 5
           successThreshold: 1
           failureThreshold: 2
