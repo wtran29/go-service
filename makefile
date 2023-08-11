@@ -150,9 +150,14 @@ GOLANG          := golang:1.20
 ALPINE          := alpine:3.18
 KIND            := kindest/node:v1.27.3
 POSTGRES        := postgres:15.3
-VAULT           := hashicorp/vault:1.13
-ZIPKIN          := openzipkin/zipkin:2.24
-TELEPRESENCE    := datawire/tel2:2.13.2
+VAULT           := hashicorp/vault:1.14
+# ZIPKIN          := openzipkin/zipkin:2.24
+GRAFANA         := grafana/grafana:9.5.3
+PROMETHEUS      := prom/prometheus:v2.44.0
+TEMPO           := grafana/tempo:2.1.1
+LOKI            := grafana/loki:2.8.2
+PROMTAIL        := grafana/promtail:2.8.2
+TELEPRESENCE    := datawire/ambassador-telepresence-manager:2.14.2
 
 KIND_CLUSTER    := sales-starter-cluster
 NAMESPACE       := sales-system
@@ -206,7 +211,7 @@ dev-docker:
 # ==============================================================================
 # Building containers
 
-all: service 
+all: service metrics
 
 service:
 	docker build \
@@ -560,8 +565,8 @@ test-endpoint-auth:
 test-endpoint-auth-local:
 	curl -il -H "Authorization: Bearer ${TOKEN}" localhost:3000/test/auth
 
-migrate:
-	go run app/tooling/admin/main.go
+# migrate:
+# 	go run app/tooling/admin/main.go
 
 query:
 	@curl -i $(SERVICE_NAME).$(NAMESPACE).svc.cluster.local:3000/users?page=1&rows=2&orderBy=name
