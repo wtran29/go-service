@@ -530,23 +530,24 @@ list:
 # ==============================================================================
 # Admin Frontend
 
-ADMIN_FRONTEND_PREFIX := ./app/frontends/admin
+ADMIN_FRONTEND_DIR := $(CURDIR)/app/frontends/admin
 
 write-token-to-env:
-	echo "NEXT_PUBLIC_BASE_API_URL=http://localhost:3000/v1" > ${ADMIN_FRONTEND_PREFIX}/.env
-	make token | grep -o '"ey.*"' | awk '{print "NEXT_PUBLIC_TOKEN="$$1}' >> ${ADMIN_FRONTEND_PREFIX}/.env
+	echo "NEXT_PUBLIC_BASE_API_URL=http://localhost:3000/v1" > $(ADMIN_FRONTEND_DIR)/.env
+	make token | grep -o '"ey.*"' | awk '{print "NEXT_PUBLIC_TOKEN="$$1}' >> $(ADMIN_FRONTEND_DIR)/.env
 
 admin-gui-install:
-	npm install --prefix ${ADMIN_FRONTEND_PREFIX}
+	cd $(ADMIN_FRONTEND_DIR) && npm install
 
 admin-gui-dev: admin-gui-install
-	npm run dev --prefix ${ADMIN_FRONTEND_PREFIX}
+	cd $(ADMIN_FRONTEND_DIR) && npm run dev
 
 admin-gui-build: admin-gui-install
-	npm run build --prefix ${ADMIN_FRONTEND_PREFIX}
+	cd $(ADMIN_FRONTEND_DIR) && npm run build
 
 admin-gui-start-build: admin-gui-build
-	npm run start --prefix ${ADMIN_FRONTEND_PREFIX}
+	cd $(ADMIN_FRONTEND_DIR) && npm run start
+
 
 admin-gui-run: write-token-to-env admin-gui-start-build
 
