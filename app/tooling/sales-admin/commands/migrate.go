@@ -7,7 +7,7 @@ import (
 	"time"
 
 	database "github.com/wtran29/go-service/business/data/database/pgx"
-	"github.com/wtran29/go-service/business/data/schema"
+	"github.com/wtran29/go-service/business/data/dbmigrate"
 )
 
 // ErrHelp provides context that help was given.
@@ -24,7 +24,7 @@ func Migrate(cfg database.Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := schema.Migrate(ctx, db); err != nil {
+	if err := dbmigrate.Migrate(ctx, db); err != nil {
 		return fmt.Errorf("migrate database: %w", err)
 	}
 

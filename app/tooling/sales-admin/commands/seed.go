@@ -6,7 +6,7 @@ import (
 	"time"
 
 	database "github.com/wtran29/go-service/business/data/database/pgx"
-	"github.com/wtran29/go-service/business/data/schema"
+	"github.com/wtran29/go-service/business/data/dbmigrate"
 )
 
 // Seed loads test data into the database.
@@ -20,7 +20,7 @@ func Seed(cfg database.Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := schema.Seed(ctx, db); err != nil {
+	if err := dbmigrate.Seed(ctx, db); err != nil {
 		return fmt.Errorf("seed database: %w", err)
 	}
 
